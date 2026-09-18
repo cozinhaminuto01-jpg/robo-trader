@@ -1,0 +1,42 @@
+# Ficheiros de configuração com segredos
+config-testnet.json
+config-real.json
+*.json.local
+
+# Estado de execução
+estado-*.json
+estado-fundo.json
+
+# Logs
+logs/
+*.log
+
+# Histórico de dados
+historico.csv
+historico.json
+dados/
+*.db
+
+# Ficheiros gerados
+*.flag
+*.tmp
+*.backup
+
+# Sistema
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Node (se usado)
+node_modules/
+package-lock.json
+
+# Python (se usado)
+__pycache__/
+*.pyc
+venv/
+
+# Binance/API temporários
+*.cache
+temp/
