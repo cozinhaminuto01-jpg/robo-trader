@@ -193,27 +193,47 @@ CRITICO:
             $jsonMatch = $outputText -match '\{[\s\S]*?"acao"[\s\S]*?\}'
             if ($jsonMatch) {
                 $jsonText = $matches[0]
-                # FIX ENCODING: Remove TODOS os caracteres estranhos agresivamente
-                # Remove + seguido de caracteres (n+úo, tend+¬ncia, etc)
-                $jsonText = $jsonText -replace '\+.', ''
-                # Remove caracteres não-ASCII
-                $jsonText = [System.Text.RegularExpressions.Regex]::Replace($jsonText, '[^\x20-\x7E":\[\]{}]', '')
-                # Limpa whitespace
-                $jsonText = $jsonText -replace "`r`n", " "
-                $jsonText = $jsonText -replace "`n", " "
-                $jsonText = $jsonText -replace ' EUR', ''
-                $jsonText = $jsonText -replace '%', ''
-                # Remove múltiplos espaços
-                $jsonText = $jsonText -replace '\s+', ' '
-                # Remove espaços ANTES de : , } [ ] para JSON válido
-                $jsonText = $jsonText -replace '\s+:', ':'
-                $jsonText = $jsonText -replace '\s+,', ','
-                $jsonText = $jsonText -replace '\s+}', '}'
-                $jsonText = $jsonText -replace '\s+\]', ']'
-                $jsonText = [System.Text.RegularExpressions.Regex]::Replace($jsonText, '"\s+:', '":')
-                # Trim
-                $jsonText = $jsonText.Trim()
-                Log "JSON extraido: $jsonText" "DEBUG"
+
+                # FIX: COMPREHENSIVE JSON CLEANING (Handles ALL Unicode spaces and encoding issues)
+                try {
+                    # Step 1: Remove encoding artifacts like n+úo, tend+¬ncia
+                    $jsonText = $jsonText -replace '\+.', ''
+
+                    # Step 2: Normalize ALL whitespace types to regular space
+                    # .NET Regex: \r, \n, \t, and \p{Zs} for Unicode spaces
+                    $jsonText = [System.Text.RegularExpressions.Regex]::Replace($jsonText, '[\r\n\t\p{Zs}]', ' ')
+
+                    # Step 3: Remove control characters that break JSON (but keep space, tab, newline)
+                    $jsonText = [System.Text.RegularExpressions.Regex]::Replace($jsonText, '[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '')
+
+                    # Step 4: Remove unwanted units and symbols
+                    $jsonText = $jsonText -replace ' EUR', ''
+                    $jsonText = $jsonText -replace '%', ''
+
+                    # Step 5: Collapse ALL consecutive spaces to single space
+                    $jsonText = $jsonText -replace ' {2,}', ' '
+
+                    # Step 6: Remove spaces BEFORE JSON syntax
+                    $jsonText = $jsonText -replace ' +:', ':'
+                    $jsonText = $jsonText -replace ' +,', ','
+                    $jsonText = $jsonText -replace ' +}', '}'
+                    $jsonText = $jsonText -replace ' +\]', ']'
+                    $jsonText = $jsonText -replace ' +\{', '{'
+                    $jsonText = $jsonText -replace ' +\[', '['
+
+                    # Step 7: Remove spaces AFTER opening brackets and BEFORE closing
+                    $jsonText = $jsonText -replace '\{\s+', '{'
+                    $jsonText = $jsonText -replace '\[\s+', '['
+                    $jsonText = $jsonText -replace '\s+}', '}'
+                    $jsonText = $jsonText -replace '\s+\]', ']'
+
+                    # Step 8: Final trim
+                    $jsonText = $jsonText.Trim()
+
+                    Log "JSON extraido (limpo): $jsonText" "DEBUG"
+                } catch {
+                    Log "Aviso: Erro durante limpeza de JSON: $_" "AVISO"
+                }
                 try {
                     $obj = $jsonText | ConvertFrom-Json
                     # FIX: Aceita JSON incompleto com valores padrão
