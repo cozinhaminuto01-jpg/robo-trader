@@ -115,4 +115,4 @@ Write-Host "`nParando sistema..." -ForegroundColor Yellow
 Stop-Job -ID $fundJob.ID, $agente1Job.ID -ErrorAction SilentlyContinue
 Remove-Job -ID $fundJob.ID, $agente1Job.ID -ErrorAction SilentlyContinue
 
-Write-Host "`n✅ Sistema parado. Consulta logs em: .\logs\" -ForegroundColor Green
+Write-Host "`nSistema parado. Consulta logs em: .\logs`\" -ForegroundColor Green
