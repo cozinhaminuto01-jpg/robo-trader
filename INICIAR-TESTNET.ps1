@@ -29,13 +29,22 @@ if (-not (Test-Path ".\config-testnet.json")) {
     exit 1
 }
 
-# Valida chaves minimas
-$config = Get-Content ".\config-testnet.json" | ConvertFrom-Json
-if ($config.anthropic_api_key -eq "COLOCA_AQUI_CHAVE_ANTHROPIC" -or $config.anthropic_api_key -eq "") {
-    Write-Host "AVISO: Chave Anthropic nao configurada!" -ForegroundColor Yellow
-    Write-Host "Edita config-testnet.json com tua chave Anthropic"
-    Write-Host "Podes obter em: https://console.anthropic.com/"
-    Read-Host "Pressiona ENTER para continuar (IA tera erros, mas testes sao locais)"
+# Valida Ollama disponivel
+Write-Host "Verificando Ollama/Mistral..." -ForegroundColor Cyan
+try {
+    $testOllama = & ollama list 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "OK: Ollama encontrado e funcional" -ForegroundColor Green
+    } else {
+        Write-Host "AVISO: Ollama pode nao estar pronto (erro ao verificar)" -ForegroundColor Yellow
+        Write-Host "Certifica-te que tens Ollama a rodar: ollama serve" -ForegroundColor Yellow
+        Read-Host "Pressiona ENTER para continuar"
+    }
+} catch {
+    Write-Host "AVISO: Ollama nao encontrado no PATH" -ForegroundColor Yellow
+    Write-Host "Certifica-te que tens Ollama instalado e no PATH" -ForegroundColor Yellow
+    Write-Host "Download: https://ollama.ai" -ForegroundColor Yellow
+    Read-Host "Pressiona ENTER para continuar"
 }
 
 Write-Host "Iniciando..." -ForegroundColor Green
