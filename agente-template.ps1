@@ -8,7 +8,8 @@
 param(
     [string]$AgenteID = "Agente_1",
     [decimal]$SaldoInicial = 20,
-    [string]$ConfigPath = ".\config-testnet.json"
+    [string]$ConfigPath = ".\config-testnet.json",
+    [decimal]$ObjetivoPatrimonio = 1000
 )
 
 # FIX ENCODING: O Windows PowerShell 5.1 escreve na consola e em ficheiros usando o
@@ -216,7 +217,7 @@ function Chama-IA {
 
     $prompt = @"
 Tens uma conta na Binance. Dinheiro disponivel (cash): $($contexto.saldo) USD.
-O teu objetivo: fazer o teu patrimonio total crescer ate aos 100 USD. Quando lá chegares, ganhas um descanso.
+O teu objetivo: fazer o teu patrimonio total crescer ate aos $ObjetivoPatrimonio USD. Quando lá chegares, ganhas um descanso.
 Se o teu patrimonio total chegar a 0, e o fim - perdes tudo e nao ha volta atras.
 $agentesInfo
 
@@ -418,7 +419,7 @@ function Cria-NovoAgente {
 
     $conteudoScript | Set-Content $novoAgenteFile -Encoding UTF8
 
-    $job = Start-Job -FilePath $novoAgenteFile -ArgumentList @("Agente_$numeroAgente", $capital, ".\config-testnet.json")
+    $job = Start-Job -FilePath $novoAgenteFile -ArgumentList @("Agente_$numeroAgente", $capital, ".\config-testnet.json", $ObjetivoPatrimonio)
 
     Log "Agente_$numeroAgente iniciado (PID: $($job.Id))" "INFO"
 
@@ -659,7 +660,7 @@ function Executa-Ciclo {
         throw
     }
 
-    if ($patrimonio -ge 100) {
+    if ($patrimonio -ge $ObjetivoPatrimonio) {
         Log "OBJETIVO ATINGIDO! Patrimonio: $patrimonio EUR" "SUCESSO"
         Log "Agente entra em repouso por 24 horas..." "INFO"
         Log "Volta a rodar amanha! Descansando..." "INFO"
@@ -814,7 +815,7 @@ function Executa-Ciclo {
     $patrimonioApos = Calcula-Patrimonio -saldo $estado.saldo -posicoes $estado.posicoes -precosAtuais $precosAtuais
     Log "Saldo (cash): $($estado.saldo) EUR | Patrimonio total: $patrimonioApos EUR | Win Rate: $($estado.winRate)%" "RESULTADO"
 
-    if ($patrimonioApos -ge 100) {
+    if ($patrimonioApos -ge $ObjetivoPatrimonio) {
         Log "OBJETIVO ATINGIDO! Patrimonio: $patrimonioApos EUR" "SUCESSO"
         $estado.objetivo = "atingido"
     }
