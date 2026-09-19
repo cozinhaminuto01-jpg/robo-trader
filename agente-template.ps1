@@ -204,89 +204,41 @@ CRITICO:
             $jsonMatch = $outputText -match '\{[\s\S]*?"acao"[\s\S]*?\}'
             if ($jsonMatch) {
                 $jsonText = $matches[0]
+                Log "JSON bruto extraido: $jsonText" "DEBUG"
 
-                # FIX: COMPREHENSIVE JSON CLEANING (Handles ALL Unicode spaces, ANSI codes, and encoding issues)
+                # FIX: DIRECT FIELD EXTRACTION VIA REGEX (bypasses ConvertFrom-Json entirely)
+                # Ollama's terminal output can corrupt individual bytes (encoding double-conversion,
+                # ANSI codes, line-wrap truncation) which breaks strict JSON parsing no matter how
+                # much we try to "repair" it. Extracting each field independently with a tolerant
+                # regex is immune to broken quotes/braces elsewhere in the blob.
                 try {
-                    # Step 1: Remove ANSI escape codes from terminal output (e.g., [2D[K, [7D[K)
-                    $jsonText = [System.Text.RegularExpressions.Regex]::Replace($jsonText, '\x1b\[[0-9;]*[a-zA-Z]', '')
+                    $acao = if ($jsonText -match '"acao["\s:]*"?([a-zA-Z]+)') { $matches[1].ToLower() } else { "hold" }
+                    $par = if ($jsonText -match '"par["\s:]*"?([A-Za-z0-9]+\s*/\s*[A-Za-z0-9]+)') { ($matches[1] -replace '\s', '').ToUpper() } else { $null }
+                    $montante = if ($jsonText -match '"montante["\s:]*"?(\d+\.?\d*)') { [decimal]$matches[1] } else { 5.0 }
+                    $stopLoss = if ($jsonText -match '"stopLoss["\s:]*"?(\d+\.?\d*)') { [decimal]$matches[1] } else { $null }
+                    $alvo = if ($jsonText -match '"alvo["\s:]*"?(\d+\.?\d*)') { [decimal]$matches[1] } else { 10 }
+                    $estrategia = if ($jsonText -match '"estrategia["\s:]*"([^"]*)"') { $matches[1] } else { "Extraida da IA" }
+                    $risco = if ($jsonText -match '"risco["\s:]*"?([a-zA-Z]+)') { $matches[1].ToLower() } else { "baixo" }
+                    $confianca = if ($jsonText -match '"confianca["\s:]*"?(\d+\.?\d*)') { [decimal]$matches[1] } else { 0.5 }
+                    $criarAgentes = if ($jsonText -match '"criarAgentes["\s:]*"?(\d+)') { [int]$matches[1] } else { 0 }
 
-                    # Step 2: Remove encoding artifacts like n+úo, tend+¬ncia
-                    $jsonText = $jsonText -replace '\+.', ''
-
-                    # Step 3: Normalize ALL whitespace types to regular space
-                    # .NET Regex: \r, \n, \t, and \p{Zs} for Unicode spaces
-                    $jsonText = [System.Text.RegularExpressions.Regex]::Replace($jsonText, '[\r\n\t\p{Zs}]', ' ')
-
-                    # Step 4: Remove control characters that break JSON (but keep space, tab, newline)
-                    $jsonText = [System.Text.RegularExpressions.Regex]::Replace($jsonText, '[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '')
-
-                    # Step 5: Remove unwanted units and symbols
-                    $jsonText = $jsonText -replace ' EUR', ''
-                    $jsonText = $jsonText -replace '%', ''
-
-                    # Step 6: Collapse ALL consecutive spaces to single space
-                    $jsonText = $jsonText -replace ' {2,}', ' '
-
-                    # Step 7: Remove spaces BEFORE JSON syntax
-                    $jsonText = $jsonText -replace ' +:', ':'
-                    $jsonText = $jsonText -replace ' +,', ','
-                    $jsonText = $jsonText -replace ' +}', '}'
-                    $jsonText = $jsonText -replace ' +\]', ']'
-                    $jsonText = $jsonText -replace ' +\{', '{'
-                    $jsonText = $jsonText -replace ' +\[', '['
-
-                    # Step 8: Remove spaces AFTER opening brackets and BEFORE closing
-                    $jsonText = $jsonText -replace '\{\s+', '{'
-                    $jsonText = $jsonText -replace '\[\s+', '['
-                    $jsonText = $jsonText -replace '\s+}', '}'
-                    $jsonText = $jsonText -replace '\s+\]', ']'
-
-                    # Step 9: AGGRESSIVE - Remove ANY character not valid in JSON
-                    # Valid: {}[]:,"  + letters, digits, minus, dot, slash, space
-                    # Removes truncation artifacts and control chars
-                    $jsonText = [System.Text.RegularExpressions.Regex]::Replace($jsonText, '[^{}\[\]:,"a-zA-Z0-9\.\-\/\s]', '')
-
-                    # Step 10: Fix missing closing quote after field name (truncation: "acao: becomes "acao":)
-                    # Match: quote, letters, colon (no closing quote) followed by space and content
-                    $jsonText = $jsonText -replace '"([a-z]+):\s+', '"$1": '
-                    # Also fix: quote, letters, quote, space, quote (like "alvo" "alvo" -> "alvo")
-                    $jsonText = $jsonText -replace '"([a-z]+)"\s+"', '"$1"'
-
-                    # Step 11: Fix quoted numbers and null values (Mistral sometimes wraps them in quotes)
-                    # "5.0" -> 5.0, "20" -> 20, "null" -> null
-                    $jsonText = $jsonText -replace '": "(\d+\.?\d*)"', ': $1'  # Remove quotes from numbers after colon
-                    $jsonText = $jsonText -replace '": "null"', ': null'       # Fix "null" to null
-                    $jsonText = $jsonText -replace '": "([a-z]+)"', ': "$1"'   # Keep quotes for strings
-
-                    # Step 12: Final trim
-                    $jsonText = $jsonText.Trim()
-
-                    Log "JSON extraido (limpo): $jsonText" "DEBUG"
-                } catch {
-                    Log "Aviso: Erro durante limpeza de JSON: $_" "AVISO"
-                }
-                try {
-                    $obj = $jsonText | ConvertFrom-Json
-                    # FIX: Aceita JSON incompleto com valores padrão
                     $deciso = @{
-                        acao = if ($obj.acao) { $obj.acao } else { "hold" }
-                        par = if ($obj.par) { $obj.par } else { $null }
-                        montante = if ($obj.montante) { [decimal]$obj.montante } else { 5.0 }
-                        stopLoss = if ($obj.stopLoss) { $obj.stopLoss } else { $null }
-                        alvo = if ($obj.alvo) { [int]$obj.alvo } else { 10 }
-                        estrategia = if ($obj.estrategia) { $obj.estrategia } else { "Extraida da IA" }
-                        risco = if ($obj.risco) { $obj.risco } else { "baixo" }
-                        confianca = if ($obj.confianca) { [decimal]$obj.confianca } else { 0.5 }
-                        raciocinio = if ($obj.raciocinio) { $obj.raciocinio } else { "JSON incompleto, usando valores padrão" }
-                        criarAgentes = if ($obj.criarAgentes) { [int]$obj.criarAgentes } else { 0 }
+                        acao = $acao
+                        par = $par
+                        montante = $montante
+                        stopLoss = $stopLoss
+                        alvo = $alvo
+                        estrategia = $estrategia
+                        risco = $risco
+                        confianca = $confianca
+                        raciocinio = "Extraido diretamente do JSON via regex"
+                        criarAgentes = $criarAgentes
                     }
 
-                    if ($deciso.acao) {
-                        Log "IA: Acao=$($deciso.acao), Par=$($deciso.par), Confianca=$($deciso.confianca), CriarAgentes=$($deciso.criarAgentes)" "IA"
-                        return $deciso
-                    }
+                    Log "IA: Acao=$($deciso.acao), Par=$($deciso.par), Confianca=$($deciso.confianca), CriarAgentes=$($deciso.criarAgentes)" "IA"
+                    return $deciso
                 } catch {
-                    Log "Erro JSON parse: $_ (tentando fallback text extraction...)" "AVISO"
+                    Log "Erro na extracao direta de campos: $_ (tentando fallback text extraction...)" "AVISO"
                 }
             } else {
                 Log "Regex nao encontrou JSON na resposta. Tentando extrair do texto..." "AVISO"
