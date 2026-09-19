@@ -1,23 +1,22 @@
 # ============================================================================
-# INICIAR TESTE DE AUTONOMIA — TESTNET
+# INICIAR TESTE DE AUTONOMIA - TESTNET
 # ============================================================================
-# Começa o sistema multi-agente em testnet
-# Vê em tempo real como a IA pensa, decide e executa
+# Comeca o sistema multi-agente em testnet
+# Ve em tempo real como a IA pensa, decide e executa
 
-Write-Host @"
-╔════════════════════════════════════════════════════════════════╗
-║   🚀 TESTE DE AUTONOMIA — Sistema Multi-Agente (TESTNET)      ║
-╚════════════════════════════════════════════════════════════════╝
-
-Este script vai:
-1. Iniciar Fund Manager (gestor central)
-2. Criar Agente 1 com 20 EUR testnet
-3. IA decide autonomamente onde investir
-4. Logs em tempo real de cada decisão
-5. Teste até atingir 100 EUR (ou falhar)
-
-Pressiona CTRL+C para parar.
-"@
+Write-Host "=========================================================="
+Write-Host "TESTE DE AUTONOMIA - Sistema Multi-Agente (TESTNET)"
+Write-Host "=========================================================="
+Write-Host ""
+Write-Host "Este script vai:"
+Write-Host "1. Iniciar Fund Manager (gestor central)"
+Write-Host "2. Criar Agente 1 com 20 EUR testnet"
+Write-Host "3. IA decide autonomamente onde investir"
+Write-Host "4. Logs em tempo real de cada decisao"
+Write-Host "5. Teste ate atingir 100 EUR (ou falhar)"
+Write-Host ""
+Write-Host "Pressiona CTRL+C para parar."
+Write-Host ""
 
 # Criar pastas
 if (-not (Test-Path ".\logs")) { mkdir ".\logs" -Force | Out-Null }
@@ -25,46 +24,46 @@ if (-not (Test-Path ".\dados")) { mkdir ".\dados" -Force | Out-Null }
 
 # Validar config
 if (-not (Test-Path ".\config-testnet.json")) {
-    Write-Host "❌ ERRO: config-testnet.json não encontrado!" -ForegroundColor Red
-    Write-Host "Edita o ficheiro com as chaves (testnet é OK para teste)"
+    Write-Host "ERRO: config-testnet.json nao encontrado!" -ForegroundColor Red
+    Write-Host "Edita o ficheiro com as chaves (testnet eh OK para teste)"
     exit 1
 }
 
-# Valida chaves mínimas
+# Valida chaves minimas
 $config = Get-Content ".\config-testnet.json" | ConvertFrom-Json
 if ($config.anthropic_api_key -eq "COLOCA_AQUI_CHAVE_ANTHROPIC" -or $config.anthropic_api_key -eq "") {
-    Write-Host "⚠️  AVISO: Chave Anthropic não configurada!" -ForegroundColor Yellow
+    Write-Host "AVISO: Chave Anthropic nao configurada!" -ForegroundColor Yellow
     Write-Host "Edita config-testnet.json com tua chave Anthropic"
     Write-Host "Podes obter em: https://console.anthropic.com/"
-    Read-Host "Pressiona ENTER para continuar (IA terá erros, mas testes são locais)"
+    Read-Host "Pressiona ENTER para continuar (IA tera erros, mas testes sao locais)"
 }
 
-Write-Host "`n✅ Iniciando..." -ForegroundColor Green
+Write-Host "Iniciando..." -ForegroundColor Green
 
 # Inicia Fund Manager em background
-Write-Host "📊 Iniciando Fund Manager..." -ForegroundColor Cyan
+Write-Host "Iniciando Fund Manager..." -ForegroundColor Cyan
 $fundJob = Start-Job -FilePath ".\fund-manager.ps1" -ArgumentList @(".\config-testnet.json")
 
 # Aguarda um segundo para Fund Manager inicializar
 Start-Sleep -Seconds 2
 
 # Inicia Agente 1 em background
-Write-Host "🤖 Iniciando Agente 1..." -ForegroundColor Cyan
+Write-Host "Iniciando Agente 1..." -ForegroundColor Cyan
 $agente1Job = Start-Job -FilePath ".\agente-template.ps1" -ArgumentList @("Agente_1", 20, ".\config-testnet.json")
 
-Write-Host "`n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Green
-Write-Host "✅ Sistema em execução!" -ForegroundColor Green
-Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Green
+Write-Host ""
+Write-Host "========================================================" -ForegroundColor Green
+Write-Host "Sistema em execucao!" -ForegroundColor Green
+Write-Host "========================================================" -ForegroundColor Green
 
-Write-Host @"
-
-📊 Monitorização em tempo real:
-   Logs: .\logs\
-   Estado Fundo: .\estado-fundo.json
-   Estado Agente 1: .\estado-Agente_1.json
-
-Outputs:
-"@
+Write-Host ""
+Write-Host "Monitorizacao em tempo real:"
+Write-Host "   Logs: .\logs\"
+Write-Host "   Estado Fundo: .\estado-fundo.json"
+Write-Host "   Estado Agente 1: .\estado-Agente_1.json"
+Write-Host ""
+Write-Host "Outputs:"
+Write-Host ""
 
 # Mostra logs em tempo real
 $logDir = ".\logs"
@@ -111,8 +110,10 @@ while ($true) {
     }
 }
 
-Write-Host "`nParando sistema..." -ForegroundColor Yellow
+Write-Host ""
+Write-Host "Parando sistema..." -ForegroundColor Yellow
 Stop-Job -ID $fundJob.ID, $agente1Job.ID -ErrorAction SilentlyContinue
 Remove-Job -ID $fundJob.ID, $agente1Job.ID -ErrorAction SilentlyContinue
 
-Write-Host "`nSistema parado. Consulta logs em: .\logs`\" -ForegroundColor Green
+Write-Host ""
+Write-Host "Sistema parado. Consulta logs em: .\logs" -ForegroundColor Green
