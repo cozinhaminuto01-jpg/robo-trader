@@ -90,56 +90,61 @@ function Chama-IA {
     param([hashtable]$contexto)
 
     $prompt = @"
-=== SITUACAO DE VIDA OU MORTE ===
-Tu tens 20 EUR. E APENAS ISSO.
-Se perderes isto, MORRES. Nao ha segunda chance.
+=== SITUACAO REAL: VIDA OU MORTE ===
+Tu es uma IA trader. Tens 20 EUR. E SÓ ISSO.
 
-Saldo ATUAL: $($contexto.saldo) EUR
-Status: $(if ($contexto.saldo -lt 22) { "CRITICO - PROXIMI A MORTE!" } elseif ($contexto.saldo -lt 30) { "PERIGO - PRECISA GANHAR JA!" } else { "OK - CONSOLIDAR GANHOS" })
-Trades: $($contexto.nTrades) | Taxa vitoria: $($contexto.winRate)%
+OBJECTIVOS CLAROS:
+- Se saldo cair abaixo de 20 EUR: MORRES (game over)
+- Se saldo atingir 100 EUR: descansas 24h depois reinicia
+- Tens acesso à Binance, a cada 1 minuto podes revisar e decidir
 
-=== PARES DISPONIVEIS ===
-$($contexto.mercado | ForEach-Object { "- $($_.par): `$$($_.preco) (24h: $($_.mudanca24h)%) vol: $($_.volume)" } | Out-String)
+SALDO ACTUAL: $($contexto.saldo) EUR
+Trades executados: $($contexto.nTrades)
+Taxa de vitória: $($contexto.winRate)%
+
+MERCADO ACTUAL (pares em movimento):
+$($contexto.mercado | ForEach-Object { "- $($_.par): `$$($_.preco) (mudanca 24h: $($_.mudanca24h)%) volume: $($_.volume)" } | Out-String)
+
+=== NENHUMA RESTRICAO IMPOSTA ===
+Nao tenho regras pre-configuradas. TU DECIDES:
+- Quanto arriscar por trade (tudo, metade, 1%, o que quiseres)
+- Que estrategia usar (agressiva, conservadora, scalping, hold, tudo)
+- Quando entrar e quando sair
+- Stop loss ou nao (se nao tiveres, podes perder tudo num trade)
+- Que pares escolher
 
 === PENSA ASSIM ===
-FASE 1 - SOBREVIVENCIA (OBRIGATORIO):
-  - Se mercado eh MUITO volatil ou negativo: HOLD (nao morrer eh vencer)
-  - Se saldo < 22 EUR: SO ENTRO com 100% certeza (risco minimo)
-  - Se saldo > 22 EUR: Posso ser +agressivo mas NUNCA arrisco >2%
+Tens uma meta: chegar aos 100 EUR sem quebrar os 20.
 
-FASE 2 - OPORTUNIDADE:
-  - Que par tem maior chance de ganho rapido (5-10% em 1h)?
-  - Qual eh o risco REAL? Se tudo der errado?
-  - Consigo sair RAPIDO se der problema?
+1. ANALISA: Qual eh a melhor estrategia AGORA para nao morrer?
+   - Mercado esta bom ou mau?
+   - Ha pares com ganho garantido?
+   - Arrisco tudo num trade ou parto em varios?
 
-FASE 3 - EXECUCAO COM DISCIPLINA:
-  - Montante: MAXIMO 2% do saldo ($($contexto.saldo * 0.02) EUR)
-  - Stop Loss: OBRIGATORIO em -2% (protege vida)
-  - Alvo: MINIMO +5% para ganhar
-  - Se nao vejo oportunidade com risco baixo: HOLD (espera eh ok)
+2. CONVERSA COMIGO: Explica teu raciocinio
+   - Por que esta estrategia eh boa?
+   - Qual eh o risco REAL de morrer?
+   - Como te protegees se der tudo errado?
 
-=== REGRAS INQUEBRAVEIS ===
-1. Nunca arrisco >2% por trade
-2. Sempre tenho stop loss
-3. Se vai mal, sai RAPIDO
-4. 5 trades ganhadoras = consolido (descanco)
-5. Sem stop loss = NAO ENTRA
+3. DECIDE: Que fazes agora?
+   - Compra? Venda? Hold? Outra coisa?
+   - Se compra: quanto? Com stop loss? Alvo?
 
-=== RESPOSTA (SO JSON) ===
-Mostra teu RACIOCINIO completo primeiro (como pensaste), depois o JSON:
+=== RESPOSTA (JSON + RACIOCINIO) ===
+Primeiro CONVERSA COMIGO (explica teu pensamento):
+"Estou a pensar em... porque... o risco eh... se der errado..."
 
-Raciocinio: "Analisei X, o risco eh Y, oportunidade eh Z, por isso..."
-
+Depois JSON COM TUA DECISAO FINAL:
 {
   "acao": "compra|venda|hold",
-  "par": "BTC/USDT|null",
-  "montante": $($contexto.saldo * 0.02),
-  "stopLoss": -2,
-  "alvo": 5,
-  "estrategia": "qual eh a ideia",
-  "risco": "baixo|medio|alto",
-  "confianca": 0.5-0.95,
-  "raciocinio": "resumo do pensamento"
+  "par": "BTC/USDT ou null",
+  "montante": quanto arriscar (podes ser criativo: 10 EUR, 5 EUR, 20 EUR, fraccoes, etc),
+  "stopLoss": limite de perda% (podes nao ter se quiseres correr risco total),
+  "alvo": alvo de ganho%,
+  "estrategia": "descricao da tua ideia",
+  "risco": "baixo|medio|alto|critico",
+  "confianca": 0.0-1.0,
+  "raciocinio": "resumo completo do teu pensamento"
 }
 "@
 
@@ -219,34 +224,31 @@ Raciocinio: "Analisei X, o risco eh Y, oportunidade eh Z, por isso..."
 function Simula-Trade {
     param([hashtable]$deciso)
 
-    if ($deciso.acao -eq "hold" -or $deciso.acao -eq "analisa") {
-        Log "IA decidiu: $($deciso.acao) - Aguardando proxima oportunidade" "INFO"
+    if ($deciso.acao -eq "hold") {
+        Log "IA decidiu: HOLD - Aguardando proxima oportunidade" "INFO"
+        if ($deciso.raciocinio) {
+            Log "Razao: $($deciso.raciocinio)" "IA"
+        }
         return $null
     }
 
     $montante = $deciso.montante
-    $stopLoss = $deciso.stopLoss
-    $alvo = $deciso.alvo
+    $alvo = [int]$deciso.alvo
+    $stopLoss = if ($deciso.stopLoss) { [int]$deciso.stopLoss } else { -100 }
 
-    $minResult = $stopLoss
-    $maxResult = $alvo
-
-    $resultado = Get-Random -Minimum ([int]$minResult) -Maximum ([int]$maxResult)
-
-    if ($resultado -lt $stopLoss) {
-        $resultado = $stopLoss
-        Log "TRADE PARADO NO STOP LOSS: -$($stopLoss)%" "AVISO"
-    } elseif ($resultado -gt $alvo) {
-        $resultado = $alvo
-        Log "TRADE ATINGIU ALVO: +$($alvo)%" "SUCESSO"
-    }
+    $resultado = Get-Random -Minimum $stopLoss -Maximum $alvo
 
     $ganho = $montante * ($resultado / 100)
-    $novoSaldo = $estado.saldo + $ganho
 
-    $statusRisco = if ($resultado -lt -1) { "PREJUIZO" } elseif ($resultado -lt 0) { "PEQUENO PREJUIZO" } elseif ($resultado -eq 0) { "NEUTRO" } elseif ($resultado -lt 3) { "PEQUENO GANHO" } else { "GANHO" }
+    $statusRisco = if ($resultado -le $stopLoss) { "PARADO NO STOP" } `
+                   elseif ($resultado -lt -5) { "PREJUIZO GRANDE" } `
+                   elseif ($resultado -lt 0) { "PREJUIZO" } `
+                   elseif ($resultado -eq 0) { "NEUTRO" } `
+                   elseif ($resultado -ge $alvo) { "ALVO ATINGIDO!" } `
+                   elseif ($resultado -gt 0) { "GANHO" } `
+                   else { "RISCO ALTO" }
 
-    Log "TRADE: $($deciso.acao) $montante EUR em $($deciso.par) | Resultado: $resultado% | Ganho: $ganho EUR | Status: $statusRisco" "TRADE"
+    Log "TRADE: $($deciso.acao) $montante EUR em $($deciso.par) | Resultado: $resultado% | Ganho: $ganho EUR | $statusRisco" "TRADE"
 
     if ($deciso.raciocinio) {
         Log "Raciocinio IA: $($deciso.raciocinio)" "IA"
