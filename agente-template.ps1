@@ -132,22 +132,34 @@ TU DECIDES TUDO:
    - Compra? Venda? Hold?
    - Cria novo agente? Quantos?
 
-=== RESPOSTA (JSON + RACIOCINIO) ===
-Primeiro CONVERSA COMIGO (pensa em voz alta):
+=== RESPOSTA OBRIGATORIA (CONVERSACAO + JSON PERFEITO) ===
 
-Depois JSON COM TUA DECISAO FINAL:
+PARTE 1: CONVERSACAO (opcional mas recomendada)
+Pensa em voz alta, explica teu raciocinio, fala dos riscos.
+
+PARTE 2: JSON VALIDO (OBRIGATORIO - DEVE SER PERFEITO)
+Responde EXATAMENTE neste formato JSON, sem aspas extras, sem unidades:
+
 {
-  "acao": "compra|venda|hold",
-  "par": "BTC/USDT ou null",
-  "montante": valor a arriscar,
-  "stopLoss": limite de perda% ou null,
-  "alvo": alvo de ganho%,
-  "estrategia": "descricao",
-  "risco": "baixo|medio|alto|critico",
-  "confianca": 0.0-1.0,
-  "raciocinio": "resumo do pensamento",
-  "criarAgentes": 0 ou numero de novos agentes a criar
+  "acao": "compra",
+  "par": "BTC/USDT",
+  "montante": 5.0,
+  "stopLoss": 10,
+  "alvo": 20,
+  "estrategia": "Compra com stop loss",
+  "risco": "medio",
+  "confianca": 0.7,
+  "raciocinio": "O mercado esta em tendencia positiva",
+  "criarAgentes": 0
 }
+
+CRITICO:
+- montante: APENAS NUMERO (ex: 5.0, nao "5.0 EUR")
+- stopLoss: APENAS NUMERO ou null (ex: 10, nao "10%")
+- alvo: APENAS NUMERO (ex: 20)
+- confianca: NUMERO entre 0 e 1 (ex: 0.7)
+- criarAgentes: NUMERO inteiro (ex: 0, 1, 2)
+- acao, risco: MINUSCULO (compra, venda, hold, baixo, medio, alto, critico)
 "@
 
     try {
@@ -170,6 +182,8 @@ Depois JSON COM TUA DECISAO FINAL:
                 $jsonText = $matches[0]
                 $jsonText = $jsonText -replace "`r`n", " "
                 $jsonText = $jsonText -replace "`n", " "
+                $jsonText = $jsonText -replace ' EUR', ''
+                $jsonText = $jsonText -replace '%', ''
                 $jsonText = $jsonText -replace '\s+', ' '
                 Log "JSON extraido: $jsonText" "DEBUG"
                 try {
