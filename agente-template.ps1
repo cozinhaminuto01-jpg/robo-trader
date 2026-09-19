@@ -99,8 +99,8 @@ $($contexto.mercado | ForEach-Object { "- $($_.par): USD `$$($_.preco) (24h: $($
 Restricoes:
 - Risco maximo: 2% ($($contexto.saldo * 0.02) EUR por trade)
 - Max 3 posicoes abertas
-- Se saldo < 15 EUR: apenas hold
-- Se saldo >= 100 EUR: repouso
+- Se saldo < 20 EUR: GAME OVER (sistema morre)
+- Se saldo >= 100 EUR: repouso 24 horas
 
 RESPONDE APENAS COM JSON (nenhuma outra explicacao):
 {
@@ -221,9 +221,21 @@ function Executa-Ciclo {
 
     Log "===== Ciclo $ciclo Iniciado =====" "CICLO"
 
-    if ($estado.saldo -lt 15) {
-        Log "Modo Seguro: saldo $($estado.saldo) EUR menor que 15 EUR" "AVISO"
-        Log "Aguardando recuperacao..." "AVISO"
+    if ($estado.saldo -lt 20) {
+        Log "GAME OVER! Saldo caiu abaixo de 20 EUR!" "ERRO"
+        Log "Saldo final: $($estado.saldo) EUR (inicial: $($estado.saldoInicial) EUR)" "RESULTADO"
+        Log "Trades executados: $($estado.trades.Count) | Win Rate: $($estado.winRate)%" "RESULTADO"
+        Save-Estado
+        exit 1
+    }
+
+    if ($estado.saldo -ge 100) {
+        Log "OBJETIVO ATINGIDO! Saldo: $($estado.saldo) EUR" "SUCESSO"
+        Log "Agente entra em repouso por 24 horas..." "INFO"
+        Log "Volta a rodar amanha! Descansando..." "INFO"
+        Save-Estado
+        Start-Sleep -Seconds 86400
+        Log "Repouso de 24h concluido. Reiniciando ciclos..." "INFO"
         return
     }
 
