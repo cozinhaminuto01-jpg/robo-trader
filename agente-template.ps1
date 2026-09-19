@@ -124,9 +124,11 @@ RESPONDE APENAS COM JSON (nenhuma outra explicacao):
             $outputText = $output -join "`n"
             Log "Resposta bruta do Mistral: $($outputText.Substring(0, [Math]::Min(300, $outputText.Length)))" "DEBUG"
 
-            $jsonMatch = $outputText -match '\{[^{}]*"acao"[^{}]*\}'
+            $jsonMatch = $outputText -match '\{[\s\S]*?"acao"[\s\S]*?\}'
             if ($jsonMatch) {
                 $jsonText = $matches[0]
+                $jsonText = $jsonText -replace "`r`n", " "
+                $jsonText = $jsonText -replace "`n", " "
                 $jsonText = $jsonText -replace '\s+', ' '
                 Log "JSON extraido: $jsonText" "DEBUG"
                 try {
