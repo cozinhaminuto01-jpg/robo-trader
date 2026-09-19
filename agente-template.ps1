@@ -203,25 +203,26 @@ CRITICO:
                 Log "JSON extraido: $jsonText" "DEBUG"
                 try {
                     $obj = $jsonText | ConvertFrom-Json
+                    # FIX: Aceita JSON incompleto com valores padrão
                     $deciso = @{
-                        acao = $obj.acao
-                        par = $obj.par
-                        montante = $obj.montante
-                        stopLoss = $obj.stopLoss
-                        alvo = $obj.alvo
-                        estrategia = $obj.estrategia
-                        risco = $obj.risco
-                        confianca = $obj.confianca
-                        raciocinio = $obj.raciocinio
-                        criarAgentes = if ($obj.criarAgentes) { $obj.criarAgentes } else { 0 }
+                        acao = if ($obj.acao) { $obj.acao } else { "hold" }
+                        par = if ($obj.par) { $obj.par } else { $null }
+                        montante = if ($obj.montante) { [decimal]$obj.montante } else { 5.0 }
+                        stopLoss = if ($obj.stopLoss) { $obj.stopLoss } else { $null }
+                        alvo = if ($obj.alvo) { [int]$obj.alvo } else { 10 }
+                        estrategia = if ($obj.estrategia) { $obj.estrategia } else { "Extraida da IA" }
+                        risco = if ($obj.risco) { $obj.risco } else { "baixo" }
+                        confianca = if ($obj.confianca) { [decimal]$obj.confianca } else { 0.5 }
+                        raciocinio = if ($obj.raciocinio) { $obj.raciocinio } else { "JSON incompleto, usando valores padrão" }
+                        criarAgentes = if ($obj.criarAgentes) { [int]$obj.criarAgentes } else { 0 }
                     }
 
-                    if ($deciso.acao -and $deciso.risco) {
+                    if ($deciso.acao) {
                         Log "IA: Acao=$($deciso.acao), Par=$($deciso.par), Confianca=$($deciso.confianca), CriarAgentes=$($deciso.criarAgentes)" "IA"
                         return $deciso
                     }
                 } catch {
-                    Log "Erro JSON parse: $_" "AVISO"
+                    Log "Erro JSON parse: $_ (tentando fallback text extraction...)" "AVISO"
                 }
             } else {
                 Log "Regex nao encontrou JSON na resposta. Tentando extrair do texto..." "AVISO"
