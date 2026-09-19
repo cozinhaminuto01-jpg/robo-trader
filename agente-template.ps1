@@ -130,7 +130,17 @@ RESPONDE APENAS COM JSON (nenhuma outra explicacao):
                 $jsonText = $jsonText -replace '\s+', ' '
                 Log "JSON extraido: $jsonText" "DEBUG"
                 try {
-                    $deciso = $jsonText | ConvertFrom-Json
+                    $obj = $jsonText | ConvertFrom-Json
+                    $deciso = @{
+                        acao = $obj.acao
+                        par = $obj.par
+                        montante = $obj.montante
+                        stopLoss = $obj.stopLoss
+                        alvo = $obj.alvo
+                        estrategia = $obj.estrategia
+                        risco = $obj.risco
+                        confianca = $obj.confianca
+                    }
 
                     if ($deciso.acao -and $deciso.risco) {
                         Log "IA: Acao=$($deciso.acao), Par=$($deciso.par), Confianca=$($deciso.confianca)" "IA"
