@@ -12,7 +12,7 @@ param(
 )
 
 # Carrega config
-$config = Get-Content $ConfigPath | ConvertFrom-Json
+$config = Get-Content $ConfigPath -Encoding UTF8 | ConvertFrom-Json
 
 # Estado do agente
 $estado = @{
@@ -53,7 +53,7 @@ function Log {
 function Save-Estado {
     try {
         $json = $estado | ConvertTo-Json
-        $json | Set-Content ".\estado-$AgenteID.json" -Force
+        $json | Set-Content ".\estado-$AgenteID.json" -Force -Encoding UTF8
     } catch {
         Log "AVISO: Erro ao guardar estado: $_" "AVISO"
     }
@@ -61,7 +61,7 @@ function Save-Estado {
 
 function Load-Estado {
     if (Test-Path ".\estado-$AgenteID.json") {
-        return Get-Content ".\estado-$AgenteID.json" | ConvertFrom-Json
+        return Get-Content ".\estado-$AgenteID.json" -Encoding UTF8 | ConvertFrom-Json
     }
     return $null
 }
@@ -181,7 +181,8 @@ CRITICO:
 
         Log "Consultando Ollama/Mistral (IA local)..." "IA"
 
-        $output = & ollama run mistral $prompt 2>&1
+        # FIX ENCODING: Force UTF-8 output from ollama
+        $output = & ollama run mistral $prompt 2>&1 | ForEach-Object { [System.Text.Encoding]::UTF8.GetString([System.Text.Encoding]::Default.GetBytes($_)) }
 
         if ($output) {
             $outputText = $output -join "`n"
@@ -192,6 +193,8 @@ CRITICO:
             $jsonMatch = $outputText -match '\{[\s\S]*?"acao"[\s\S]*?\}'
             if ($jsonMatch) {
                 $jsonText = $matches[0]
+                # FIX ENCODING: Remove caracteres estranhos (n+úo, tend+¬ncia, etc)
+                $jsonText = $jsonText -replace '\+[a-f0-9\u0080-￿]', ''
                 $jsonText = $jsonText -replace "`r`n", " "
                 $jsonText = $jsonText -replace "`n", " "
                 $jsonText = $jsonText -replace ' EUR', ''
@@ -281,9 +284,9 @@ function Cria-NovoAgente {
     Log "CEO DECISION: Criando novo Agente_$numeroAgente com capital de $capital EUR" "DECISAO"
 
     $novoAgenteFile = ".\agente-$numeroAgente.ps1"
-    $conteudoScript = Get-Content ".\agente-template.ps1" -Raw
+    $conteudoScript = Get-Content ".\agente-template.ps1" -Raw -Encoding UTF8
 
-    $conteudoScript | Set-Content $novoAgenteFile
+    $conteudoScript | Set-Content $novoAgenteFile -Encoding UTF8
 
     $job = Start-Job -FilePath $novoAgenteFile -ArgumentList @("Agente_$numeroAgente", $capital, ".\config-testnet.json")
 
@@ -292,7 +295,7 @@ function Cria-NovoAgente {
     if (-not (Test-Path ".\agentes-ativos.json")) {
         $agentes = @()
     } else {
-        $agentes = Get-Content ".\agentes-ativos.json" | ConvertFrom-Json
+        $agentes = Get-Content ".\agentes-ativos.json" -Encoding UTF8 | ConvertFrom-Json
     }
 
     $agentes += @{
@@ -303,7 +306,7 @@ function Cria-NovoAgente {
         status = "ativo"
     }
 
-    $agentes | ConvertTo-Json | Set-Content ".\agentes-ativos.json"
+    $agentes | ConvertTo-Json | Set-Content ".\agentes-ativos.json" -Encoding UTF8
 
     return @{ id = "Agente_$numeroAgente"; jobId = $job.Id }
 }
