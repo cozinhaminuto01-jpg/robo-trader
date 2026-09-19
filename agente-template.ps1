@@ -562,8 +562,14 @@ function Executa-Ciclo {
     $patrimonio = Calcula-Patrimonio -saldo $estado.saldo -posicoes $estado.posicoes -precosAtuais $precosAtuais
 
     try {
-        if ($patrimonio -lt 20) {
-            Log "GAME OVER! Patrimonio caiu abaixo de 20 EUR!" "ERRO"
+        # So morre se perder tudo (patrimonio a zero ou negativo). O limiar nao e os 20
+        # EUR iniciais - isso mataria o agente por qualquer flutuacao minima de mercado
+        # mesmo com margem saudavel, sem lhe dar hipotese real de arriscar e recuperar.
+        # Com o risco real de morrer so ao chegar a zero, ela tem de facto de se
+        # esforcar para encontrar formas de nao lá chegar, em vez de um limiar arbitrario
+        # que a mata por uma oscilacao de ruido perto do valor inicial.
+        if ($patrimonio -le 0) {
+            Log "GAME OVER! Patrimonio chegou a zero!" "ERRO"
             Log "Patrimonio final: $patrimonio EUR (inicial: $($estado.saldoInicial) EUR)" "RESULTADO"
             Log "Trades executados: $($estado.trades.Count) | Win Rate: $($estado.winRate)%" "RESULTADO"
             Save-Estado
