@@ -333,7 +333,7 @@ function Cria-NovoAgente {
 # ============================================================================
 
 function Simula-Trade {
-    param([hashtable]$deciso)
+    param([hashtable]$deciso, [decimal]$saldoAtual)
 
     if ($deciso.acao -eq "hold") {
         Log "IA decidiu: HOLD - Aguardando proxima oportunidade" "INFO"
@@ -346,6 +346,27 @@ function Simula-Trade {
     $montante = $deciso.montante
     $alvo = [int]$deciso.alvo
     $stopLoss = if ($deciso.stopLoss) { [int]$deciso.stopLoss } else { -100 }
+
+    # PROTECAO CRITICA: garante que a pior perda possivel deste trade nao faz o
+    # saldo cair abaixo dos 20 EUR (a regra inquebravel do jogo).
+    $margemDisponivel = $saldoAtual - 20
+    $perdaMaximaPossivel = $montante * ([Math]::Abs($stopLoss) / 100)
+
+    if ($margemDisponivel -le 0) {
+        Log "PROTECAO: Sem margem de seguranca (saldo=$saldoAtual EUR). Trade cancelado, forcando HOLD." "AVISO"
+        return $null
+    }
+
+    if ($perdaMaximaPossivel -gt $margemDisponivel) {
+        $montanteSeguro = [Math]::Floor(($margemDisponivel / ([Math]::Abs($stopLoss) / 100)) * 100) / 100
+        Log "PROTECAO: Montante $montante EUR podia arriscar $([Math]::Round($perdaMaximaPossivel,2)) EUR (so ha $([Math]::Round($margemDisponivel,2)) EUR de margem). Reduzindo montante para $montanteSeguro EUR." "AVISO"
+        $montante = $montanteSeguro
+
+        if ($montante -le 0) {
+            Log "PROTECAO: Margem insuficiente para qualquer trade seguro. Trade cancelado, forcando HOLD." "AVISO"
+            return $null
+        }
+    }
 
     $resultado = Get-Random -Minimum $stopLoss -Maximum $alvo
 
@@ -443,7 +464,7 @@ function Executa-Ciclo {
         }
     }
 
-    $trade = Simula-Trade -deciso $deciso
+    $trade = Simula-Trade -deciso $deciso -saldoAtual $estado.saldo
     if ($trade) {
         $estado.trades += $trade
         $estado.saldo += $trade.ganho
