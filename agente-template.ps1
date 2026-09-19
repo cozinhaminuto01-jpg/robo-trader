@@ -184,9 +184,10 @@ No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos
                     $confianca = if ($jsonText -match '"?confianca"?\s*:\s*"?(\d+\.?\d*)') { [decimal]$matches[1] } else { 0.5 }
                     $criarAgentes = if ($jsonText -match '"?criarAgentes"?\s*:\s*"?(\d+)') { [int]$matches[1] } else { 0 }
 
-                    # Guarda o texto de raciocinio livre (tudo antes do bloco JSON) para servir de memoria nos proximos ciclos
-                    $indiceJson = $outputText.IndexOf($jsonText)
-                    $raciocinio = if ($indiceJson -gt 0) { $outputText.Substring(0, $indiceJson).Trim() } else { "" }
+                    # Guarda o texto de raciocinio livre para servir de memoria nos proximos ciclos.
+                    # Ela nem sempre coloca a explicacao antes do JSON - as vezes decide primeiro e
+                    # explica depois - por isso apanha-se tudo o resto do texto, nao so o que vem antes.
+                    $raciocinio = $outputText.Replace($jsonText, "").Trim()
                     if ([string]::IsNullOrWhiteSpace($raciocinio)) { $raciocinio = "(sem texto de raciocinio nesta resposta)" }
 
                     $deciso = @{
