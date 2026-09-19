@@ -90,29 +90,22 @@ function Chama-IA {
     param([hashtable]$contexto)
 
     $prompt = @"
-Tu es um trader autonomo com 20 EUR. Tens liberdade total.
-Capital atual: $($contexto.saldo) EUR
-Historico de trades: $($contexto.nTrades) trades, $($contexto.winRate)% vitorias
-Mercado agora (pares com movimento):
+Tu es um trader autonomo. Saldo: $($contexto.saldo) EUR
+Trades executados: $($contexto.nTrades), Taxa vitoria: $($contexto.winRate)%
 
-$($contexto.mercado | ForEach-Object { "- $($_.par): USD `$$($_.preco) (mudanca 24h: $($_.mudanca24h)% volume: $($_.volume))" } | Out-String)
+Pares em movimento:
+$($contexto.mercado | ForEach-Object { "- $($_.par): USD `$$($_.preco) (24h: $($_.mudanca24h)%)" } | Out-String)
 
-Contexto:
-- Risco maximo por trade: 2% (0.4 EUR)
-- Maximo 3 posicoes abertas
-- Se saldo menor que 15 EUR: modo seguro (so hold, sem compras)
-- Se saldo maior ou igual a 100 EUR: ciclo termina, repouso 24h
+Restricoes:
+- Risco maximo: 2% ($($contexto.saldo * 0.02) EUR por trade)
+- Max 3 posicoes abertas
+- Se saldo < 15 EUR: apenas hold
+- Se saldo >= 100 EUR: repouso
 
-Decide AGORA:
-1. Que estrategia ve neste mercado? (scalping, swing, grid, hold, etc)
-2. Em que par entra? (se entra)
-3. Montante? Stop loss? Alvo?
-4. Por que?
-
-Responde EM JSON VALIDO (sem explicacao adicional):
+RESPONDE APENAS COM JSON (nenhuma outra explicacao):
 {
-  "acao": "compra|venda|hold|analisa",
-  "par": "BTC/USDT ou null",
+  "acao": "compra|venda|hold",
+  "par": "BTC/USDT|null",
   "montante": 2.5,
   "stopLoss": 1.5,
   "alvo": 3.5,
@@ -128,24 +121,28 @@ Responde EM JSON VALIDO (sem explicacao adicional):
         $output = & ollama run mistral $prompt 2>&1
 
         if ($output) {
-            $jsonStr = $output | Select-String -Pattern '\{.*"acao".*\}' -AllMatches
+            $outputText = $output -join "`n"
 
-            if ($jsonStr) {
+            $jsonMatch = $outputText -match '\{[^{}]*"acao"[^{}]*\}'
+            if ($jsonMatch) {
+                $jsonText = $matches[0]
                 try {
-                    $jsonText = $jsonStr.Matches[0].Value
                     $deciso = $jsonText | ConvertFrom-Json
 
                     if ($deciso.acao -and $deciso.risco) {
-                        Log "IA (Ollama/Mistral): Acao=$($deciso.acao), Par=$($deciso.par), Confianca=$($deciso.confianca)" "IA"
+                        Log "IA: Acao=$($deciso.acao), Par=$($deciso.par), Confianca=$($deciso.confianca)" "IA"
                         return $deciso
                     }
                 } catch {
-                    Log "Erro ao fazer parse do JSON: $_" "AVISO"
+                    Log "Parse error: $_" "AVISO"
                 }
+            } else {
+                Log "Nao conseguiu extrair JSON da resposta" "AVISO"
+                Log "Resposta recebida (primeiros 200 chars): $($outputText.Substring(0, [Math]::Min(200, $outputText.Length)))" "DEBUG"
             }
         }
 
-        Log "Ollama respondeu mas JSON invalido. Modo hold defensivo." "AVISO"
+        Log "JSON invalido. Modo hold defensivo." "AVISO"
         return @{
             acao = "hold"
             par = $null
@@ -155,7 +152,7 @@ Responde EM JSON VALIDO (sem explicacao adicional):
         }
 
     } catch {
-        Log "Erro ao chamar Ollama/Mistral: $_" "ERRO"
+        Log "Erro ao chamar Ollama: $_" "ERRO"
         return @{
             acao = "hold"
             par = $null
