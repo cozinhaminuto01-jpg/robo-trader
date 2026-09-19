@@ -296,6 +296,13 @@
             <canvas id="evolutionChart"></canvas>
         </div>
 
+        <div class="panel" style="margin-bottom: 20px;">
+            <h2>💼 Posições Abertas</h2>
+            <div class="trades-list" id="posicoes">
+                <div style="color: #999; font-size: 12px;">Sem posições abertas...</div>
+            </div>
+        </div>
+
         <div class="main-grid">
             <div class="panel">
                 <h2>💭 Raciocínio da IA (Último Ciclo)</h2>
@@ -358,6 +365,16 @@
             }
         }
 
+        async function loadMercadoState() {
+            try {
+                const response = await fetch('./mercado-estado.json');
+                if (!response.ok) return null;
+                return await response.json();
+            } catch {
+                return null;
+            }
+        }
+
         async function loadLatestLog() {
             try {
                 // Simula leitura de logs - em produção seria via WebSocket ou polling
@@ -378,6 +395,7 @@
         async function updateDashboard() {
             const state = await loadAgentState();
             if (!state) return;
+            const mercado = await loadMercadoState();
 
             updateHeader(state);
             updateStats(state);
@@ -386,6 +404,7 @@
             updateDecisions(state);
             updateTrades(state);
             updateCycles(state);
+            updatePosicoes(state, mercado);
             document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString('pt-PT');
         }
 
@@ -433,15 +452,25 @@
         }
 
         function updateChart(state) {
-            const trades = state.trades || [];
-            const labels = trades.map((_, i) => `Trade ${i + 1}`);
-            let cumulativeSaldo = 20;
-            const balances = [20];
+            // Usa o patrimonio (cash + posicoes abertas) de cada ciclo quando disponivel -
+            // mais preciso que somar so os trades realizados, pois reflete o valor real
+            // incluindo posicoes ainda por fechar (nao realizadas)
+            const ciclos = state.ciclosHistorico || [];
+            let labels, balances;
 
-            trades.forEach(trade => {
-                cumulativeSaldo += trade.ganho || 0;
-                balances.push(Math.max(cumulativeSaldo, 0));
-            });
+            if (ciclos.length > 0) {
+                labels = ciclos.map(c => `Ciclo ${c.ciclo}`);
+                balances = ciclos.map(c => Number(c.patrimonioApos));
+            } else {
+                const trades = state.trades || [];
+                labels = trades.map((_, i) => `Trade ${i + 1}`);
+                let cumulativeSaldo = 20;
+                balances = [20];
+                trades.forEach(trade => {
+                    cumulativeSaldo += trade.ganho || 0;
+                    balances.push(Math.max(cumulativeSaldo, 0));
+                });
+            }
 
             const ctx = document.getElementById('evolutionChart').getContext('2d');
 
@@ -564,6 +593,31 @@
             });
 
             document.getElementById('cycles').innerHTML = html || '<div class="conversation-msg"><span class="label">Aguardando...</span><div>Sistema a inicializar...</div></div>';
+        }
+
+        function updatePosicoes(state, mercado) {
+            const posicoes = state.posicoes || [];
+            let html = '';
+
+            posicoes.forEach(p => {
+                const precoAtual = mercado && mercado[p.par] ? Number(mercado[p.par]) : Number(p.precoEntrada);
+                const valorAtual = Number(p.quantidade) * precoAtual;
+                const ganho = valorAtual - Number(p.montanteInvestido);
+                const pct = p.montanteInvestido > 0 ? (ganho / Number(p.montanteInvestido)) * 100 : 0;
+                const isWin = ganho > 0;
+                const className = isWin ? 'win' : (ganho < 0 ? 'loss' : 'neutral');
+                const sign = ganho > 0 ? '+' : '';
+
+                html += `
+                    <div class="trade-item ${className}">
+                        <strong>${escapeHtml(p.par)}</strong> | Investido: ${Number(p.montanteInvestido).toFixed(2)} EUR a $${Number(p.precoEntrada).toFixed(4)}
+                        <br/>Preço atual: $${precoAtual.toFixed(4)} | Valor atual: ${valorAtual.toFixed(2)} EUR | ${sign}${ganho.toFixed(2)} EUR (${sign}${pct.toFixed(2)}%)
+                        ${(p.stopLoss !== null && p.stopLoss !== undefined) || (p.alvo !== null && p.alvo !== undefined) ? `<br/>Stop loss: ${p.stopLoss ?? 'N/A'}% | Alvo: ${p.alvo ?? 'N/A'}%` : ''}
+                    </div>
+                `;
+            });
+
+            document.getElementById('posicoes').innerHTML = html || '<div style="color: #999; font-size: 12px;">Sem posições abertas...</div>';
         }
 
         function updateTrades(state) {

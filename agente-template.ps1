@@ -113,17 +113,69 @@ function Get-BalanceBinance {
     }
 }
 
-function Get-MercadoData {
-    if ($config.ambiente -eq "testnet") {
-        $pares = @(
-            @{ par = "BTC/USDT"; preco = 43250; mudanca24h = 2.5; volume = 1500000000 },
-            @{ par = "ETH/USDT"; preco = 2280; mudanca24h = 1.8; volume = 900000000 },
-            @{ par = "SOL/USDT"; preco = 185; mudanca24h = -1.2; volume = 450000000 },
-            @{ par = "XRP/USDT"; preco = 2.45; mudanca24h = 0.5; volume = 300000000 },
-            @{ par = "ADA/USDT"; preco = 1.15; mudanca24h = 3.2; volume = 250000000 }
-        )
-        return $pares | Get-Random -Count (Get-Random -Minimum 2 -Maximum 5)
+$MERCADO_ESTADO_PATH = ".\mercado-estado.json"
+$MERCADO_PRECOS_BASE = @{
+    "BTC/USDT" = 43250.0
+    "ETH/USDT" = 2280.0
+    "SOL/USDT" = 185.0
+    "XRP/USDT" = 2.45
+    "ADA/USDT" = 1.15
+}
+
+function Load-MercadoEstado {
+    if (Test-Path $MERCADO_ESTADO_PATH) {
+        try {
+            $obj = Get-Content $MERCADO_ESTADO_PATH -Encoding UTF8 | ConvertFrom-Json
+            $precos = @{}
+            foreach ($p in $obj.PSObject.Properties) {
+                $precos[$p.Name] = [decimal]$p.Value
+            }
+            if ($precos.Count -gt 0) { return $precos }
+        } catch {
+            Log "AVISO: Erro ao carregar estado do mercado, a usar precos base: $_" "AVISO"
+        }
     }
+    return $MERCADO_PRECOS_BASE.Clone()
+}
+
+function Save-MercadoEstado {
+    param([hashtable]$precos)
+    try {
+        $precos | ConvertTo-Json | Set-Content $MERCADO_ESTADO_PATH -Force -Encoding UTF8
+    } catch {
+        Log "AVISO: Erro ao guardar estado do mercado: $_" "AVISO"
+    }
+}
+
+# Evolui os precos do mercado uma vez por ciclo (passeio aleatorio) e persiste-os num
+# ficheiro partilhado, para que todos os agentes (incluindo os criados por ela) vejam
+# o MESMO mercado a mudar ao longo do tempo, em vez de cada um simular a sua propria
+# realidade de precos desligada das outras.
+function Avanca-Mercado {
+    $precos = Load-MercadoEstado
+    $variacoes = @{}
+    foreach ($par in @($precos.Keys)) {
+        $variacaoPct = (Get-Random -Minimum -300 -Maximum 301) / 100.0
+        $precos[$par] = [Math]::Max([decimal]($precos[$par] * (1 + ($variacaoPct / 100))), 0.0001)
+        $variacoes[$par] = $variacaoPct
+    }
+    Save-MercadoEstado -precos $precos
+    return @{ precos = $precos; variacoes = $variacoes }
+}
+
+function Get-MercadoData {
+    param([hashtable]$precos, [hashtable]$variacoes)
+
+    $pares = @()
+    foreach ($par in $precos.Keys) {
+        $pares += @{
+            par = $par
+            preco = [Math]::Round($precos[$par], 4)
+            mudanca24h = $variacoes[$par]
+            volume = Get-Random -Minimum 100000000 -Maximum 2000000000
+        }
+    }
+    return $pares | Get-Random -Count (Get-Random -Minimum 2 -Maximum ($pares.Count + 1))
 }
 
 # ============================================================================
@@ -141,10 +193,22 @@ function Chama-IA {
 
     $agentesInfo = if ($contexto.numAgentes -gt 1) { "Tens tambem $($contexto.numAgentes - 1) outra(s) conta(s)/agente(s) que ja criaste antes." } else { "" }
 
+    $posicoesTexto = if ($contexto.posicoes -and $contexto.posicoes.Count -gt 0) {
+        ($contexto.posicoes | ForEach-Object {
+            $pct = if ($_.precoEntrada -gt 0) { [Math]::Round((($_.precoAtual - $_.precoEntrada) / $_.precoEntrada) * 100, 2) } else { 0 }
+            "- $($_.par): investiste $([Math]::Round($_.montanteInvestido,2)) USD a `$$($_.precoEntrada), preco atual `$$($_.precoAtual) ($pct%), valor atual $([Math]::Round($_.valorAtual,2)) USD"
+        }) -join "`n"
+    } else {
+        "(nenhuma posicao aberta neste momento - todo o dinheiro esta em cash)"
+    }
+
     $prompt = @"
-Tens uma conta na Binance. Saldo actual: $($contexto.saldo) USD.
-O teu objetivo: fazer este saldo crescer ate aos 100 USD. Quando lá chegares, ganhas um descanso.
+Tens uma conta na Binance. Dinheiro disponivel (cash): $($contexto.saldo) USD.
+O teu objetivo: fazer o teu patrimonio total crescer ate aos 100 USD. Quando lá chegares, ganhas um descanso.
 $agentesInfo
+
+As tuas posicoes abertas neste momento:
+$posicoesTexto
 
 O que ja pensaste sobre isto em conversas anteriores:
 $memoria
@@ -152,7 +216,7 @@ $memoria
 Informacao disponivel na tua conta Binance neste momento:
 $($contexto.mercado | ForEach-Object { "- $($_.par): `$$($_.preco) (mudanca 24h: $($_.mudanca24h)%) volume: $($_.volume)" } | Out-String)
 
-Ninguem te vai dizer o que fazer nem como fazer. Pensa livremente sobre a tua situacao e decide tu mesmo o que fazer a seguir.
+Ninguem te vai dizer o que fazer nem como fazer. Pensa livremente sobre a tua situacao e decide tu mesmo o que fazer a seguir - podes abrir uma posicao nova, reforcar ou vender uma que ja tens, ou nao fazer nada agora.
 
 No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos que nao se aplicarem, e 0 se nao quiseres criar nada):
 
@@ -322,79 +386,135 @@ function Cria-NovoAgente {
 }
 
 # ============================================================================
-# SIMULADOR DE TRADES (Testnet)
+# POSICOES PERSISTENTES (Testnet)
 # ============================================================================
+# Em vez de resolver cada trade instantaneamente com um resultado aleatorio, uma
+# compra abre (ou reforca) uma posicao real que persiste entre ciclos, com preco de
+# entrada e quantidade. O valor da posicao flutua com o preco de mercado (que tambem
+# evolui a cada ciclo), e so se realiza o ganho/perda quando ela vende ou quando um
+# stop loss / alvo que ela propria definiu e atingido - tal como numa exchange real.
 
-function Simula-Trade {
-    param([hashtable]$deciso, [decimal]$saldoAtual)
+# Ela nao e ensinada a dizer "compra"/"venda"/"hold" especificamente - usa as suas
+# proprias palavras. Classifica a intencao pela presenca de radicais comuns em
+# portugues, sem lhe impor nenhum vocabulario exato.
+function Classifica-Acao {
+    param([string]$acao)
 
-    # Ela nao e ensinada a dizer "hold" especificamente - usa as suas proprias palavras
-    # para dizer "nao fazer nada agora" (manter, aguardar, esperar, etc). Reconhece os
-    # sinonimos mais comuns em portugues para nao fabricar um trade que ela nao pediu.
-    $semAcaoNova = @("hold", "manter", "aguardar", "esperar", "nada", "aguardando", "esperando")
-    if ($semAcaoNova -contains $deciso.acao) {
-        Log "IA decidiu nao abrir novo trade (acao='$($deciso.acao)') - Aguardando proxima oportunidade" "INFO"
-        if ($deciso.raciocinio) {
-            Log "Razao: $($deciso.raciocinio)" "IA"
-        }
-        return $null
+    if ([string]::IsNullOrWhiteSpace($acao)) { return "hold" }
+    $a = $acao.ToLower()
+
+    if ($a -match "vend|sair|fechar") { return "venda" }
+    if ($a -match "^hold$|manter|aguardar|esperar|^nada$") { return "hold" }
+    return "compra"
+}
+
+function Abre-OuAdiciona-Posicao {
+    param([array]$posicoes, [string]$par, [decimal]$montante, [decimal]$precoAtual, $stopLoss, $alvo)
+
+    $quantidadeNova = $montante / $precoAtual
+    $existente = $posicoes | Where-Object { $_.par -eq $par } | Select-Object -First 1
+
+    if ($existente) {
+        $novaQuantidade = $existente.quantidade + $quantidadeNova
+        $novoMontanteInvestido = $existente.montanteInvestido + $montante
+        $existente.quantidade = $novaQuantidade
+        $existente.montanteInvestido = $novoMontanteInvestido
+        $existente.precoEntrada = $novoMontanteInvestido / $novaQuantidade
+        if ($null -ne $stopLoss) { $existente.stopLoss = $stopLoss }
+        if ($null -ne $alvo) { $existente.alvo = $alvo }
+        # FIX: a virgula unaria forca isto a sair como array mesmo com 1 so elemento -
+        # sem ela, o PowerShell "desembrulha" um array de 1 elemento devolvido por uma
+        # funcao para o proprio elemento, transformando $posicoes de volta numa hashtable
+        # solta (e ".Count" passaria a contar propriedades da posicao, nao posicoes)
+        return ,$posicoes
     }
 
-    $montante = $deciso.montante
-    $alvo = [int]$deciso.alvo
-    $stopLoss = if ($deciso.stopLoss) { [int]$deciso.stopLoss } else { -100 }
-
-    # Uma exchange real nunca executa uma ordem maior que o saldo disponivel na conta -
-    # isto nao e uma regra de estrategia, e um limite fisico de qualquer conta real
-    if ($montante -gt $saldoAtual) {
-        Log "AVISO: Pediu para investir $montante EUR mas so ha $saldoAtual EUR na conta. Uma exchange real limitaria a ordem ao saldo disponivel." "AVISO"
-        $montante = $saldoAtual
+    $novaPosicao = @{
+        par = $par
+        quantidade = $quantidadeNova
+        montanteInvestido = $montante
+        precoEntrada = $precoAtual
+        stopLoss = $stopLoss
+        alvo = $alvo
+        abertoEm = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
     }
+    return ,(@($posicoes) + @($novaPosicao))
+}
 
-    # O resultado de um trade nunca pode variar mais que -100% (perda total) ou +100%;
-    # isto evita percentagens irrealistas quando stopLoss/alvo sao escritos como precos
-    # absolutos em vez de percentagens - nao dita como definir stop loss, so mantem o
-    # resultado da simulacao dentro do fisicamente possivel
-    $stopLoss = [Math]::Min([Math]::Max($stopLoss, -100), 100)
-    $alvo = [Math]::Min([Math]::Max($alvo, -100), 100)
+function Fecha-Posicao {
+    param([array]$posicoes, [string]$par, [decimal]$precoAtual)
 
-    # Get-Random exige Minimum < Maximum ou o script crasha; isto e apenas para o
-    # simulador nao rebentar com valores inesperados, nao impoe nenhuma regra de trading
-    if ($stopLoss -ge $alvo) {
-        if ($stopLoss -ge 100) {
-            $stopLoss = 99
-        }
-        $alvo = $stopLoss + 1
-    }
+    $posicao = $posicoes | Where-Object { $_.par -eq $par } | Select-Object -First 1
+    if (-not $posicao) { return @{ posicoes = $posicoes; resultado = $null } }
 
-    $resultado = Get-Random -Minimum $stopLoss -Maximum $alvo
-
-    $ganho = $montante * ($resultado / 100)
-
-    $statusRisco = if ($resultado -le $stopLoss) { "PARADO NO STOP" } `
-                   elseif ($resultado -lt -5) { "PREJUIZO GRANDE" } `
-                   elseif ($resultado -lt 0) { "PREJUIZO" } `
-                   elseif ($resultado -eq 0) { "NEUTRO" } `
-                   elseif ($resultado -ge $alvo) { "ALVO ATINGIDO!" } `
-                   elseif ($resultado -gt 0) { "GANHO" } `
-                   else { "RISCO ALTO" }
-
-    Log "TRADE: $($deciso.acao) $montante EUR em $($deciso.par) | Resultado: $resultado% | Ganho: $ganho EUR | $statusRisco" "TRADE"
-
-    if ($deciso.raciocinio) {
-        Log "Raciocinio IA: $($deciso.raciocinio)" "IA"
-    }
+    $valorAtual = $posicao.quantidade * $precoAtual
+    $ganho = $valorAtual - $posicao.montanteInvestido
+    $novasPosicoes = @($posicoes | Where-Object { $_.par -ne $par })
 
     return @{
-        acao = $deciso.acao
-        par = $deciso.par
-        montante = $montante
-        resultado = $resultado
-        ganho = $ganho
-        estrategia = $deciso.estrategia
-        raciocinio = $deciso.raciocinio
-        timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
+        posicoes = $novasPosicoes
+        resultado = @{
+            par = $par
+            montanteInvestido = $posicao.montanteInvestido
+            valorAtual = $valorAtual
+            ganho = $ganho
+            resultadoPct = if ($posicao.montanteInvestido -gt 0) { [Math]::Round(($ganho / $posicao.montanteInvestido) * 100, 2) } else { 0 }
+        }
     }
+}
+
+# Verifica todas as posicoes abertas contra o preco atual e fecha automaticamente
+# qualquer uma que tenha atingido o stop loss ou o alvo que ela propria definiu -
+# exatamente como uma ordem de stop loss / take profit reagiria numa exchange real.
+function Verifica-StopLossAlvo {
+    param([array]$posicoes, [hashtable]$precosAtuais)
+
+    $fechadas = @()
+    $posicoesRestantes = @()
+
+    foreach ($p in $posicoes) {
+        $precoAtual = $precosAtuais[$p.par]
+        if (-not $precoAtual) { $posicoesRestantes += $p; continue }
+
+        $pctMovimento = (($precoAtual - $p.precoEntrada) / $p.precoEntrada) * 100
+        $motivo = $null
+
+        if ($null -ne $p.stopLoss -and $pctMovimento -le $p.stopLoss) {
+            $motivo = "stop loss atingido ($([Math]::Round($pctMovimento,2))% <= $($p.stopLoss)%)"
+        } elseif ($null -ne $p.alvo -and $pctMovimento -ge $p.alvo) {
+            $motivo = "alvo atingido ($([Math]::Round($pctMovimento,2))% >= $($p.alvo)%)"
+        }
+
+        if ($motivo) {
+            $valorAtual = $p.quantidade * $precoAtual
+            $fechadas += @{
+                par = $p.par
+                montanteInvestido = $p.montanteInvestido
+                valorAtual = $valorAtual
+                ganho = $valorAtual - $p.montanteInvestido
+                motivo = $motivo
+            }
+        } else {
+            $posicoesRestantes += $p
+        }
+    }
+
+    return @{ posicoes = $posicoesRestantes; fechadas = $fechadas }
+}
+
+# Patrimonio total = dinheiro disponivel + valor atual de tudo o que tem investido.
+# O game over e o objetivo de 100 usam isto, nao so o saldo em dinheiro - caso
+# contrario, alguem com pouco dinheiro solto mas uma posicao valiosa aberta seria
+# injustamente declarado "morto" apesar de ter riqueza real por realizar.
+function Calcula-Patrimonio {
+    param([decimal]$saldo, [array]$posicoes, [hashtable]$precosAtuais)
+
+    $valorPosicoes = 0
+    foreach ($p in $posicoes) {
+        $precoAtual = if ($precosAtuais[$p.par]) { $precosAtuais[$p.par] } else { $p.precoEntrada }
+        $valorPosicoes += $p.quantidade * $precoAtual
+    }
+    return $saldo + $valorPosicoes
 }
 
 # ============================================================================
@@ -404,12 +524,21 @@ function Simula-Trade {
 function Executa-Ciclo {
     param([int]$ciclo)
 
-    try {
-        Log "===== Ciclo $ciclo Iniciado =====" "CICLO"
+    Log "===== Ciclo $ciclo Iniciado =====" "CICLO"
 
-        if ($estado.saldo -lt 20) {
-            Log "GAME OVER! Saldo caiu abaixo de 20 EUR!" "ERRO"
-            Log "Saldo final: $($estado.saldo) EUR (inicial: $($estado.saldoInicial) EUR)" "RESULTADO"
+    # O mercado evolui uma vez por ciclo, partilhado entre todos os agentes
+    $mercadoAvancado = Avanca-Mercado
+    $precosAtuais = $mercadoAvancado.precos
+    $variacoes = $mercadoAvancado.variacoes
+
+    # Patrimonio = dinheiro + valor atual de tudo o que tem investido. E isto que
+    # decide game over / objetivo atingido, nao so o dinheiro solto em caixa.
+    $patrimonio = Calcula-Patrimonio -saldo $estado.saldo -posicoes $estado.posicoes -precosAtuais $precosAtuais
+
+    try {
+        if ($patrimonio -lt 20) {
+            Log "GAME OVER! Patrimonio caiu abaixo de 20 EUR!" "ERRO"
+            Log "Patrimonio final: $patrimonio EUR (inicial: $($estado.saldoInicial) EUR)" "RESULTADO"
             Log "Trades executados: $($estado.trades.Count) | Win Rate: $($estado.winRate)%" "RESULTADO"
             Save-Estado
             exit 1
@@ -419,8 +548,8 @@ function Executa-Ciclo {
         throw
     }
 
-    if ($estado.saldo -ge 100) {
-        Log "OBJETIVO ATINGIDO! Saldo: $($estado.saldo) EUR" "SUCESSO"
+    if ($patrimonio -ge 100) {
+        Log "OBJETIVO ATINGIDO! Patrimonio: $patrimonio EUR" "SUCESSO"
         Log "Agente entra em repouso por 24 horas..." "INFO"
         Log "Volta a rodar amanha! Descansando..." "INFO"
         Save-Estado
@@ -429,7 +558,29 @@ function Executa-Ciclo {
         return
     }
 
-    $dadosMercado = Get-MercadoData
+    # Verifica stop loss / alvo automaticos em todas as posicoes abertas, antes dela
+    # sequer pensar neste ciclo - tal como uma ordem real dispararia sozinha
+    $verificacao = Verifica-StopLossAlvo -posicoes $estado.posicoes -precosAtuais $precosAtuais
+    $estado.posicoes = $verificacao.posicoes
+    $fechosAutomaticos = @()
+    foreach ($f in $verificacao.fechadas) {
+        $estado.saldo += $f.valorAtual
+        $tradeAuto = @{
+            acao = "venda (automatica)"
+            par = $f.par
+            montante = $f.montanteInvestido
+            resultado = if ($f.montanteInvestido -gt 0) { [Math]::Round(($f.ganho / $f.montanteInvestido) * 100, 2) } else { 0 }
+            ganho = $f.ganho
+            estrategia = $f.motivo
+            raciocinio = "Fechado automaticamente: $($f.motivo)"
+            timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
+        }
+        $estado.trades += $tradeAuto
+        $fechosAutomaticos += $tradeAuto
+        Log "AUTO: Posicao $($f.par) fechada automaticamente - $($f.motivo) - Ganho: $($f.ganho) EUR" "TRADE"
+    }
+
+    $dadosMercado = Get-MercadoData -precos $precosAtuais -variacoes $variacoes
 
     $numAgentes = 0
     if (Test-Path ".\agentes-ativos.json") {
@@ -439,6 +590,17 @@ function Executa-Ciclo {
 
     Log "Analisando $($dadosMercado.Count) pares em movimento ($numAgentes agentes ativos)..." "INFO"
 
+    $posicoesContexto = @($estado.posicoes | ForEach-Object {
+        $precoAtual = if ($precosAtuais[$_.par]) { $precosAtuais[$_.par] } else { $_.precoEntrada }
+        @{
+            par = $_.par
+            montanteInvestido = $_.montanteInvestido
+            precoEntrada = $_.precoEntrada
+            precoAtual = $precoAtual
+            valorAtual = $_.quantidade * $precoAtual
+        }
+    })
+
     $contexto = @{
         saldo = $estado.saldo
         nTrades = $estado.trades.Count
@@ -446,6 +608,7 @@ function Executa-Ciclo {
         mercado = $dadosMercado
         numAgentes = $numAgentes
         historico = $estado.historico
+        posicoes = $posicoesContexto
     }
     $deciso = Chama-IA -contexto $contexto
 
@@ -472,26 +635,74 @@ function Executa-Ciclo {
         }
     }
 
-    $trade = Simula-Trade -deciso $deciso -saldoAtual $estado.saldo
-    if ($trade) {
-        $estado.trades += $trade
-        $estado.saldo += $trade.ganho
-        $estado.ultimaTradaEm = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
+    $tipoAcao = Classifica-Acao -acao $deciso.acao
+    $trade = $null
 
-        $vitorias = @($estado.trades | Where-Object { $_.ganho -gt 0 }).Count
-        $estado.winRate = [Math]::Round(($vitorias / $estado.trades.Count) * 100, 1)
-
-        Log "Novo saldo: $($estado.saldo) EUR | Win Rate: $($estado.winRate)%" "RESULTADO"
-
-        if ($vitorias -ge 5 -and $vitorias % 5 -eq 0) {
-            Log "===== CONSOLIDACAO DE GANHOS =====" "SUCESSO"
-            Log "5 trades ganhadoras atingidas! Saldo protegido: $($estado.saldo) EUR" "SUCESSO"
-            Log "IA vai entrar em modo +conservador para proteger ganhos" "AVISO"
+    if ($tipoAcao -eq "compra" -and -not $deciso.par) {
+        Log "AVISO: Quis comprar mas nao especificou um par." "AVISO"
+    } elseif ($tipoAcao -eq "compra") {
+        $precoAtualPar = $precosAtuais[$deciso.par]
+        if (-not $precoAtualPar) {
+            Log "AVISO: Par '$($deciso.par)' desconhecido no mercado. Sem trade." "AVISO"
+        } else {
+            $montante = $deciso.montante
+            # Uma exchange real nunca executa uma ordem maior que o dinheiro disponivel -
+            # isto nao e uma regra de estrategia, e um limite fisico de qualquer conta real
+            if ($montante -gt $estado.saldo) {
+                Log "AVISO: Pediu para investir $montante EUR mas so ha $($estado.saldo) EUR na conta. Uma exchange real limitaria a ordem ao saldo disponivel." "AVISO"
+                $montante = $estado.saldo
+            }
+            if ($montante -gt 0) {
+                $estado.posicoes = Abre-OuAdiciona-Posicao -posicoes $estado.posicoes -par $deciso.par -montante $montante -precoAtual $precoAtualPar -stopLoss $deciso.stopLoss -alvo $deciso.alvo
+                $estado.saldo -= $montante
+                Log "POSICAO: Investidos $montante EUR em $($deciso.par) a `$$precoAtualPar" "TRADE"
+            }
         }
+    } elseif ($tipoAcao -eq "venda" -and -not $deciso.par) {
+        Log "AVISO: Quis vender mas nao especificou um par." "AVISO"
+    } elseif ($tipoAcao -eq "venda") {
+        $precoAtualPar = $precosAtuais[$deciso.par]
+        if (-not $precoAtualPar) {
+            Log "AVISO: Par '$($deciso.par)' desconhecido no mercado. Sem trade." "AVISO"
+        } else {
+            $fecho = Fecha-Posicao -posicoes $estado.posicoes -par $deciso.par -precoAtual $precoAtualPar
+            if ($fecho.resultado) {
+                $estado.posicoes = $fecho.posicoes
+                $estado.saldo += $fecho.resultado.valorAtual
+                $trade = @{
+                    acao = "venda"
+                    par = $fecho.resultado.par
+                    montante = $fecho.resultado.montanteInvestido
+                    resultado = $fecho.resultado.resultadoPct
+                    ganho = $fecho.resultado.ganho
+                    estrategia = $deciso.estrategia
+                    raciocinio = $deciso.raciocinio
+                    timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
+                }
+                Log "TRADE: Vendeu $($deciso.par) | Resultado: $($fecho.resultado.resultadoPct)% | Ganho: $($fecho.resultado.ganho) EUR" "TRADE"
+            } else {
+                Log "AVISO: Pediu para vender $($deciso.par) mas nao tem posicao aberta nesse par." "AVISO"
+            }
+        }
+    } else {
+        Log "IA decidiu nao abrir/fechar nada agora (acao='$($deciso.acao)')" "INFO"
     }
 
-    if ($estado.saldo -ge 100) {
-        Log "OBJETIVO ATINGIDO! Saldo: $($estado.saldo) EUR" "SUCESSO"
+    if ($trade) {
+        $estado.trades += $trade
+        $estado.ultimaTradaEm = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
+    }
+
+    if ($estado.trades.Count -gt 0) {
+        $vitorias = @($estado.trades | Where-Object { $_.ganho -gt 0 }).Count
+        $estado.winRate = [Math]::Round(($vitorias / $estado.trades.Count) * 100, 1)
+    }
+
+    $patrimonioApos = Calcula-Patrimonio -saldo $estado.saldo -posicoes $estado.posicoes -precosAtuais $precosAtuais
+    Log "Saldo (cash): $($estado.saldo) EUR | Patrimonio total: $patrimonioApos EUR | Win Rate: $($estado.winRate)%" "RESULTADO"
+
+    if ($patrimonioApos -ge 100) {
+        Log "OBJETIVO ATINGIDO! Patrimonio: $patrimonioApos EUR" "SUCESSO"
         $estado.objetivo = "atingido"
     }
 
@@ -507,16 +718,19 @@ function Executa-Ciclo {
         resultado = if ($trade) { $trade.resultado } else { $null }
         ganho = if ($trade) { $trade.ganho } else { 0 }
         saldoApos = $estado.saldo
+        patrimonioApos = $patrimonioApos
+        posicoesFechadasAutomaticamente = $fechosAutomaticos
     }
     $estado.ciclosHistorico += $entradaCiclo
     if ($estado.ciclosHistorico.Count -gt 100) {
         $estado.ciclosHistorico = $estado.ciclosHistorico | Select-Object -Last 100
     }
 
-    $resumoTelegram = "Ciclo #$ciclo - Saldo: $($estado.saldo) EUR`n`n" + `
+    $resumoTelegram = "Ciclo #$ciclo - Patrimonio: $patrimonioApos EUR (cash: $($estado.saldo) EUR)`n`n" + `
         "Pensamento:`n$($deciso.raciocinio)`n`n" + `
         "Decisao: $($deciso.acao) $($deciso.montante) em $($deciso.par)" + `
-        $(if ($trade) { "`nResultado: $($trade.resultado)% | Ganho: $($trade.ganho) EUR" } else { "" })
+        $(if ($trade) { "`nResultado: $($trade.resultado)% | Ganho: $($trade.ganho) EUR" } else { "" }) + `
+        $(if ($fechosAutomaticos.Count -gt 0) { "`n`nFechados automaticamente:`n" + (($fechosAutomaticos | ForEach-Object { "- $($_.par): $($_.estrategia) | Ganho: $($_.ganho) EUR" }) -join "`n") } else { "" })
     if ($resumoTelegram.Length -gt 3500) {
         $resumoTelegram = $resumoTelegram.Substring(0, 3500) + "..."
     }

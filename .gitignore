@@ -6,6 +6,8 @@ config-real.json
 # Estado de execução
 estado-*.json
 estado-fundo.json
+mercado-estado.json
+agentes-ativos.json
 
 # Logs
 logs/
