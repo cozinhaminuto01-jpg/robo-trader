@@ -195,11 +195,16 @@ CRITICO:
                 $jsonText = $matches[0]
                 # FIX ENCODING: Remove caracteres estranhos (n+úo, tend+¬ncia, etc)
                 $jsonText = $jsonText -replace '\+[a-f0-9\u0080-￿]', ''
-                $jsonText = $jsonText -replace "`r`n", " "
-                $jsonText = $jsonText -replace "`n", " "
+                $jsonText = $jsonText -replace "`r`n", ""
+                $jsonText = $jsonText -replace "`n", ""
                 $jsonText = $jsonText -replace ' EUR', ''
                 $jsonText = $jsonText -replace '%', ''
+                # FIX: Limpa espaços múltiplos (ANTES de colons/commas)
                 $jsonText = $jsonText -replace '\s+', ' '
+                # Remove espaços ANTES de : , } para JSON válido
+                $jsonText = $jsonText -replace '\s+:', ':'
+                $jsonText = $jsonText -replace '\s+,', ','
+                $jsonText = $jsonText -replace '\s+}', '}'
                 Log "JSON extraido: $jsonText" "DEBUG"
                 try {
                     $obj = $jsonText | ConvertFrom-Json
