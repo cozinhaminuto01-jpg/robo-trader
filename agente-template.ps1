@@ -37,10 +37,17 @@ $logFile = "$logDir\$AgenteID-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
 
 function Log {
     param([string]$msg, [string]$tipo = "INFO")
-    $ts = Get-Date -Format "HH:mm:ss"
-    $linha = "[$ts] [$tipo] $msg"
-    Write-Host "[$AgenteID] $linha"
-    Add-Content -Path $logFile -Value $linha
+    try {
+        $ts = Get-Date -Format "HH:mm:ss"
+        $agenteStr = if ($AgenteID) { $AgenteID } else { "Agent" }
+        $linha = "[$ts] [$tipo] $msg"
+        Write-Host "[$agenteStr] $linha" -ErrorAction SilentlyContinue
+        if ($logFile -and (Test-Path (Split-Path $logFile))) {
+            Add-Content -Path $logFile -Value $linha -ErrorAction SilentlyContinue
+        }
+    } catch {
+        Write-Host "Log error: $_"
+    }
 }
 
 function Save-Estado {
