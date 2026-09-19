@@ -408,8 +408,34 @@ function Classifica-Acao {
     return "compra"
 }
 
+# Ela normalmente pensa em precos absolutos para o stop loss/alvo (ex: "vender a 1.05
+# USD"), nao em percentagens, mesmo o sistema so aceitando percentagens - confirmado
+# pelo proprio raciocinio dela ("alvo 2.5, which is a 116.45% increase from my current
+# position price"). Sem isto, um stopLoss positivo tipo "1.05" seria comparado
+# diretamente como percentagem, e como qualquer queda negativa e sempre menor que um
+# numero positivo, a posicao fechava-se quase de imediato em qualquer ciclo seguinte,
+# independentemente do movimento real do preco. Quando o valor dado esta na mesma
+# ordem de grandeza do preco atual (entre 50% e 300% dele), interpreta-o como um
+# preco-alvo e converte para a percentagem de variacao equivalente; caso contrario,
+# assume que ja e uma percentagem.
+function Interpreta-Percentagem {
+    param($valor, [decimal]$precoReferencia)
+
+    if ($null -eq $valor -or $precoReferencia -le 0) { return $valor }
+    $valorDecimal = [decimal]$valor
+    $razao = [Math]::Abs($valorDecimal) / $precoReferencia
+
+    if ($razao -ge 0.5 -and $razao -le 3) {
+        return (($valorDecimal - $precoReferencia) / $precoReferencia) * 100
+    }
+    return $valorDecimal
+}
+
 function Abre-OuAdiciona-Posicao {
     param([array]$posicoes, [string]$par, [decimal]$montante, [decimal]$precoAtual, $stopLoss, $alvo)
+
+    $stopLoss = Interpreta-Percentagem -valor $stopLoss -precoReferencia $precoAtual
+    $alvo = Interpreta-Percentagem -valor $alvo -precoReferencia $precoAtual
 
     $quantidadeNova = $montante / $precoAtual
     $existente = $posicoes | Where-Object { $_.par -eq $par } | Select-Object -First 1
