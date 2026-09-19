@@ -22,6 +22,7 @@ $estado = @{
     posicoes = @()
     historico = @()
     trades = @()
+    ciclosHistorico = @()
     winRate = 0
     ultimaTradaEm = $null
 }
@@ -52,10 +53,29 @@ function Log {
 
 function Save-Estado {
     try {
-        $json = $estado | ConvertTo-Json
+        $json = $estado | ConvertTo-Json -Depth 6
         $json | Set-Content ".\estado-$AgenteID.json" -Force -Encoding UTF8
     } catch {
         Log "AVISO: Erro ao guardar estado: $_" "AVISO"
+    }
+}
+
+function Send-Telegram {
+    param([string]$mensagem)
+
+    try {
+        if (-not $config.telegram_token -or $config.telegram_token -eq "COLOCA_AQUI_TOKEN_TELEGRAM") { return }
+        if (-not $config.telegram_chat_id -or $config.telegram_chat_id -eq "COLOCA_AQUI_CHAT_ID") { return }
+
+        $uri = "https://api.telegram.org/bot$($config.telegram_token)/sendMessage"
+        $body = @{
+            chat_id = $config.telegram_chat_id
+            text = $mensagem
+        } | ConvertTo-Json
+
+        Invoke-RestMethod -Uri $uri -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
+    } catch {
+        Log "AVISO: Erro ao enviar mensagem Telegram: $_" "AVISO"
     }
 }
 
@@ -70,6 +90,7 @@ function Load-Estado {
             posicoes = if ($obj.posicoes) { @($obj.posicoes) } else { @() }
             historico = if ($obj.historico) { @($obj.historico) } else { @() }
             trades = if ($obj.trades) { @($obj.trades) } else { @() }
+            ciclosHistorico = if ($obj.ciclosHistorico) { @($obj.ciclosHistorico) } else { @() }
             winRate = if ($obj.winRate) { [decimal]$obj.winRate } else { 0 }
             ultimaTradaEm = if ($obj.ultimaTradaEm) { $obj.ultimaTradaEm } else { $null }
         }
@@ -465,6 +486,33 @@ function Executa-Ciclo {
         Log "OBJETIVO ATINGIDO! Saldo: $($estado.saldo) EUR" "SUCESSO"
         $estado.objetivo = "atingido"
     }
+
+    # Regista este ciclo completo (pensamento + decisao + resultado) para o dashboard e Telegram
+    # poderem mostrar o historico de pensamentos dela, ciclo a ciclo - nao so o ultimo trade
+    $entradaCiclo = @{
+        ciclo = $ciclo
+        timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
+        raciocinio = $deciso.raciocinio
+        acao = $deciso.acao
+        par = $deciso.par
+        montante = $deciso.montante
+        resultado = if ($trade) { $trade.resultado } else { $null }
+        ganho = if ($trade) { $trade.ganho } else { 0 }
+        saldoApos = $estado.saldo
+    }
+    $estado.ciclosHistorico += $entradaCiclo
+    if ($estado.ciclosHistorico.Count -gt 100) {
+        $estado.ciclosHistorico = $estado.ciclosHistorico | Select-Object -Last 100
+    }
+
+    $resumoTelegram = "Ciclo #$ciclo - Saldo: $($estado.saldo) EUR`n`n" + `
+        "Pensamento:`n$($deciso.raciocinio)`n`n" + `
+        "Decisao: $($deciso.acao) $($deciso.montante) em $($deciso.par)" + `
+        $(if ($trade) { "`nResultado: $($trade.resultado)% | Ganho: $($trade.ganho) EUR" } else { "" })
+    if ($resumoTelegram.Length -gt 3500) {
+        $resumoTelegram = $resumoTelegram.Substring(0, 3500) + "..."
+    }
+    Send-Telegram -mensagem $resumoTelegram
 
     Save-Estado
     Log "===== Ciclo $ciclo Terminado =====`n" "CICLO"

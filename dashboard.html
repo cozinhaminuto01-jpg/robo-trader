@@ -369,6 +369,12 @@
             }
         }
 
+        function escapeHtml(texto) {
+            const div = document.createElement('div');
+            div.textContent = texto == null ? '' : String(texto);
+            return div.innerHTML;
+        }
+
         async function updateDashboard() {
             const state = await loadAgentState();
             if (!state) return;
@@ -376,8 +382,10 @@
             updateHeader(state);
             updateStats(state);
             updateChart(state);
+            updateReasoning(state);
             updateDecisions(state);
             updateTrades(state);
+            updateCycles(state);
             document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString('pt-PT');
         }
 
@@ -485,31 +493,77 @@
             }
         }
 
+        function updateReasoning(state) {
+            const ciclos = state.ciclosHistorico || [];
+            const ultimos = ciclos.slice(-15).reverse();
+
+            let html = '';
+            ultimos.forEach(c => {
+                const temResultado = c.resultado !== null && c.resultado !== undefined;
+                const resumoAcao = temResultado
+                    ? `${(c.acao || 'hold').toUpperCase()} ${c.par ? 'em ' + c.par : ''} | Resultado: ${c.resultado}% | Ganho: ${c.ganho > 0 ? '+' : ''}${Number(c.ganho).toFixed(2)} EUR`
+                    : `${(c.acao || 'hold').toUpperCase()}`;
+                const hora = c.timestamp ? new Date(c.timestamp).toLocaleTimeString('pt-PT') : '';
+
+                html += `
+                    <div class="conversation-msg ia">
+                        <span class="label">💭 Ciclo #${c.ciclo} - ${hora}</span>
+                        <div style="white-space: pre-wrap;">${escapeHtml(c.raciocinio || '(sem raciocinio)')}</div>
+                        <div style="margin-top:8px; opacity:0.85;"><strong>${escapeHtml(resumoAcao)}</strong> | Saldo apos: ${Number(c.saldoApos).toFixed(2)} EUR</div>
+                    </div>
+                `;
+            });
+
+            document.getElementById('reasoning').innerHTML = html || '<div class="conversation-msg ia"><span class="label">À espera de dados...</span><div>Aguardando primeiro ciclo...</div></div>';
+        }
+
         function updateDecisions(state) {
-            const trades = state.trades || [];
-            const lastTrade = trades[trades.length - 1];
+            const ciclos = state.ciclosHistorico || [];
+            const ultimo = ciclos[ciclos.length - 1];
 
             let html = '';
 
-            if (lastTrade) {
+            if (ultimo) {
                 html += `
                     <div class="conversation-msg decision">
-                        <span class="label">📊 Última Decisão</span>
-                        <div><strong>Par:</strong> ${lastTrade.par || 'N/A'}</div>
-                        <div><strong>Ação:</strong> ${lastTrade.acao || 'hold'}</div>
-                        <div><strong>Montante:</strong> ${lastTrade.montante} EUR</div>
-                        <div><strong>Estratégia:</strong> ${lastTrade.estrategia || 'N/A'}</div>
-                    </div>
-                    <div class="conversation-msg result">
-                        <span class="label">📈 Resultado</span>
-                        <div><strong>Resultado:</strong> ${lastTrade.resultado}%</div>
-                        <div><strong>Ganho/Perda:</strong> ${lastTrade.ganho > 0 ? '+' : ''}${lastTrade.ganho.toFixed(2)} EUR</div>
-                        <div><strong>Timestamp:</strong> ${new Date(lastTrade.timestamp).toLocaleTimeString('pt-PT')}</div>
+                        <span class="label">📊 Última Decisão (Ciclo #${ultimo.ciclo})</span>
+                        <div><strong>Ação:</strong> ${ultimo.acao || 'hold'}</div>
+                        <div><strong>Par:</strong> ${ultimo.par || 'N/A'}</div>
+                        <div><strong>Montante:</strong> ${ultimo.montante || 0} EUR</div>
                     </div>
                 `;
+                if (ultimo.resultado !== null && ultimo.resultado !== undefined) {
+                    html += `
+                        <div class="conversation-msg result">
+                            <span class="label">📈 Resultado</span>
+                            <div><strong>Resultado:</strong> ${ultimo.resultado}%</div>
+                            <div><strong>Ganho/Perda:</strong> ${ultimo.ganho > 0 ? '+' : ''}${Number(ultimo.ganho).toFixed(2)} EUR</div>
+                            <div><strong>Timestamp:</strong> ${new Date(ultimo.timestamp).toLocaleTimeString('pt-PT')}</div>
+                        </div>
+                    `;
+                }
             }
 
             document.getElementById('decisions').innerHTML = html || '<div style="color: #999;">À espera do primeiro trade...</div>';
+        }
+
+        function updateCycles(state) {
+            const ciclos = state.ciclosHistorico || [];
+            const ultimos = ciclos.slice(-15).reverse();
+
+            let html = '';
+            ultimos.forEach(c => {
+                const hora = c.timestamp ? new Date(c.timestamp).toLocaleTimeString('pt-PT') : '';
+                const temResultado = c.resultado !== null && c.resultado !== undefined;
+                html += `
+                    <div class="conversation-msg">
+                        <span class="label">Ciclo #${c.ciclo} - ${hora}</span>
+                        <div>${(c.acao || 'hold').toUpperCase()} ${c.par ? 'em ' + escapeHtml(c.par) : ''}${temResultado ? ' | ' + c.resultado + '%' : ''} | Saldo: ${Number(c.saldoApos).toFixed(2)} EUR</div>
+                    </div>
+                `;
+            });
+
+            document.getElementById('cycles').innerHTML = html || '<div class="conversation-msg"><span class="label">Aguardando...</span><div>Sistema a inicializar...</div></div>';
         }
 
         function updateTrades(state) {
