@@ -243,8 +243,14 @@ No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos
 
         Log "Consultando Ollama/Mistral (IA local)..." "IA"
 
-        # FIX ENCODING: Force UTF-8 output from ollama
-        $output = & ollama run mistral $prompt 2>&1 | ForEach-Object { [System.Text.Encoding]::UTF8.GetString([System.Text.Encoding]::Default.GetBytes($_)) }
+        # Nota: ja NAO se faz aqui a dupla conversao GetString(Default.GetBytes(...)) que
+        # existia antes. Essa conversao so era necessaria porque a consola nao estava a
+        # decodificar o UTF-8 do Ollama corretamente por omissao. Agora que forcamos
+        # [Console]::OutputEncoding para UTF-8 no arranque do script, a captura do
+        # output do Ollama ja vem correta - manter aquela dupla conversao aqui em cima
+        # disto corromperia texto que ja esta certo (foi o que causou a corrupcao "?"
+        # e "�" vista depois de aplicar o fix da consola)
+        $output = & ollama run mistral $prompt 2>&1
 
         if ($output) {
             $outputText = $output -join "`n"
@@ -280,8 +286,12 @@ No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos
                     # quebra a linha mesmo a meio do valor, duplicando a aspa de cada lado da quebra
                     # (ex: stopLoss: " seguido de quebra de linha e so depois "1.75) - uma unica aspa
                     # opcional nao chega, é preciso tolerar varias aspas/espacos misturados seguidos
-                    $acao = if ($jsonText -match '"?acao"?\s*:[\s"]*([a-zA-Z]+)') { $matches[1].ToLower() } else { "hold" }
-                    $par = if ($jsonText -match '"?par"?\s*:[\s"]*([A-Za-z0-9]+(?:\s*/\s*[A-Za-z0-9]+)?)') { ($matches[1] -replace '\s', '').ToUpper() } else { $null }
+                    # Nota: exclui "null" do que e capturado - ela segue a nossa instrucao de
+                    # escrever null quando um campo nao se aplica, mas isso e a PALAVRA "null",
+                    # que a regex de resto capturaria como se fosse um valor real (ex: um par
+                    # chamado "NULL"), quando na verdade significa ausencia de valor
+                    $acao = if ($jsonText -match '"?acao"?\s*:[\s"]*([a-zA-Z]+)' -and $matches[1] -ne 'null') { $matches[1].ToLower() } else { "hold" }
+                    $par = if ($jsonText -match '"?par"?\s*:[\s"]*([A-Za-z0-9]+(?:\s*/\s*[A-Za-z0-9]+)?)' -and $matches[1] -ne 'null') { ($matches[1] -replace '\s', '').ToUpper() } else { $null }
                     $montante = if ($jsonText -match '"?montante"?\s*:[\s"]*(\d+\.?\d*)') { [decimal]$matches[1] } else { 5.0 }
                     $stopLoss = if ($jsonText -match '"?stopLoss"?\s*:[\s"]*(\d+\.?\d*)') { [decimal]$matches[1] } else { $null }
                     $alvo = if ($jsonText -match '"?alvo"?\s*:[\s"]*(\d+\.?\d*)') { [decimal]$matches[1] } else { 10 }
@@ -317,8 +327,8 @@ No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos
             } else {
                 Log "Regex nao encontrou JSON na resposta. Tentando extrair do texto..." "AVISO"
 
-                $acao = if ($outputText -match '"?acao"?\s*:[\s"]*([a-z]+)') { $matches[1] } else { "hold" }
-                $par = if ($outputText -match '"?par"?\s*:[\s"]*([A-Za-z0-9]+(?:\s*/\s*[A-Za-z0-9]+)?)') { ($matches[1] -replace '\s', '').ToUpper() } else { $null }
+                $acao = if ($outputText -match '"?acao"?\s*:[\s"]*([a-z]+)' -and $matches[1] -ne 'null') { $matches[1] } else { "hold" }
+                $par = if ($outputText -match '"?par"?\s*:[\s"]*([A-Za-z0-9]+(?:\s*/\s*[A-Za-z0-9]+)?)' -and $matches[1] -ne 'null') { ($matches[1] -replace '\s', '').ToUpper() } else { $null }
                 $montante = if ($outputText -match '"?montante"?\s*:[\s"]*(\d+\.?\d*)') { [decimal]$matches[1] } else { 5.0 }
                 $stopLoss = if ($outputText -match '"?stopLoss"?\s*:[\s"]*(\d+\.?\d*)') { [decimal]$matches[1] } else { $null }
                 $alvo = if ($outputText -match '"?alvo"?\s*:[\s"]*(\d+\.?\d*)') { [decimal]$matches[1] } else { 10 }
