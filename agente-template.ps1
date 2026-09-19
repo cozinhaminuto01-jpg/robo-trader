@@ -1,9 +1,9 @@
 # ============================================================================
-# AGENTE GENÉRICO — Trader Autónomo com IA
+# AGENTE GENÉRICO — Trader Autónomo com IA Local (Ollama/Mistral)
 # ============================================================================
 # Cada instância roda em paralelo, toma decisões próprias
-# Usa Claude Haiku para pensar onde investir, como, quando
-# Sem estratégia pré-configurada: IA descobre
+# Usa Mistral (Ollama local) para pensar onde investir, como, quando
+# Sem estratégia pré-configurada: IA descobre autonomamente
 
 param(
     [string]$AgenteID = "Agente_1",
@@ -59,29 +59,18 @@ function Load-Estado {
 # ============================================================================
 
 function Get-BalanceBinance {
-    # Em testnet, retorna simulação
-    # Em real, chama API real
-
     if ($config.ambiente -eq "testnet") {
-        # Simulação: retorna saldo atual
         return @{
             USDT = $estado.saldo
             BTC = 0
             ETH = 0
             SOL = 0
         }
-    } else {
-        # TODO: Chamada real à API Binance
-        Write-Host "Função real não implementada"
     }
 }
 
 function Get-MercadoData {
-    # Busca dados do mercado (pares com movimento)
-    # Em testnet: dados simulados
-
     if ($config.ambiente -eq "testnet") {
-        # Simula pares em movimento
         $pares = @(
             @{ par = "BTC/USDT"; preco = 43250; mudanca24h = 2.5; volume = 1500000000 },
             @{ par = "ETH/USDT"; preco = 2280; mudanca24h = 1.8; volume = 900000000 },
@@ -94,7 +83,7 @@ function Get-MercadoData {
 }
 
 # ============================================================================
-# CHAMADA À IA (Claude Haiku)
+# CHAMADA À IA (Ollama/Mistral — IA Local)
 # ============================================================================
 
 function Chama-IA {
@@ -106,7 +95,7 @@ Capital atual: $($contexto.saldo) EUR
 Histórico de trades: $($contexto.nTrades) trades, $($contexto.winRate)% vitórias
 Mercado agora (pares com movimento):
 
-$($contexto.mercado | ForEach-Object { "- $($_.par): $($_.preco)$ (mudança 24h: $($_.mudanca24h)% | volume: $($_.volume))" } | Out-String)
+$($contexto.mercado | ForEach-Object { "- $($_.par): `$$($_.preco) (mudança 24h: $($_.mudanca24h)% | volume: $($_.volume))" } | Out-String)
 
 Contexto:
 - Risco máximo por trade: 2% (0.4 EUR)
@@ -120,7 +109,7 @@ Decide AGORA:
 3. Montante? Stop loss? Alvo?
 4. Por quê?
 
-Sê conciso. Responde em JSON:
+Responde EM JSON VÁLIDO (sem explicação adicional):
 {
   "acao": "compra|venda|hold|analisa",
   "par": "BTC/USDT ou null",
@@ -133,39 +122,48 @@ Sê conciso. Responde em JSON:
 }
 "@
 
-    # Chama API Anthropic
-    $apiKey = $config.anthropic_api_key
-    $headers = @{
-        "x-api-key" = $apiKey
-        "anthropic-version" = "2023-06-01"
-        "content-type" = "application/json"
-    }
-
-    $body = @{
-        model = "claude-3-5-haiku-20241022"
-        max_tokens = 500
-        messages = @(
-            @{
-                role = "user"
-                content = $prompt
-            }
-        )
-    } | ConvertTo-Json
-
     try {
-        $response = Invoke-RestMethod -Uri "https://api.anthropic.com/v1/messages" `
-            -Method POST `
-            -Headers $headers `
-            -Body $body
+        Log "Consultando Ollama/Mistral (IA local)..." "IA"
 
-        $resposta = $response.content[0].text
+        # Chamar Ollama localmente via PowerShell
+        $output = & ollama run mistral $prompt 2>&1
 
-        # Tenta parse JSON
-        $deciso = $resposta | ConvertFrom-Json
-        return $deciso
+        # Tentar extrair JSON da resposta
+        if ($output) {
+            # Procurar um bloco JSON na resposta
+            $jsonMatch = $output | Select-String -Pattern '\{[^{}]*"acao"[^{}]*\}' -AllMatches
+
+            if ($jsonMatch) {
+                $jsonStr = $jsonMatch.Matches[0].Value
+                $deciso = $jsonStr | ConvertFrom-Json
+
+                # Validar campos obrigatórios
+                if ($deciso.acao -and $deciso.risco) {
+                    Log "IA (Ollama/Mistral): Ação=$($deciso.acao), Par=$($deciso.par), Confiança=$($deciso.confianca)" "IA"
+                    return $deciso
+                }
+            }
+        }
+
+        # Fallback: IA não respondeu bem
+        Log "Ollama respondeu mas JSON inválido. Modo hold defensivo." "AVISO"
+        return @{
+            acao = "hold"
+            par = $null
+            risco = "baixo"
+            confianca = 0.3
+            estrategia = "Aguardando próxima oportunidade"
+        }
+
     } catch {
-        Log "Erro ao chamar IA: $_" "ERRO"
-        return @{ acao = "hold"; risco = "erro" }
+        Log "Erro ao chamar Ollama/Mistral: $_" "ERRO"
+        return @{
+            acao = "hold"
+            par = $null
+            risco = "baixo"
+            confianca = 0
+            estrategia = "Erro de comunicação"
+        }
     }
 }
 
@@ -220,7 +218,6 @@ function Executa-Ciclo {
     Log "Analisando $($dadosMercado.Count) pares em movimento..." "INFO"
 
     # 3. Chama IA para decisão
-    Log "Consultando IA para decisão..." "IA"
     $contexto = @{
         saldo = $estado.saldo
         nTrades = $estado.trades.Count
@@ -229,7 +226,7 @@ function Executa-Ciclo {
     }
     $deciso = Chama-IA -contexto $contexto
 
-    Log "IA respondeu: $($deciso | ConvertTo-Json -Compress)" "IA"
+    Log "Decisão: $($deciso | ConvertTo-Json -Compress)" "IA"
 
     # 4. Executa trade (simulado em testnet)
     $trade = Simula-Trade -deciso $deciso
@@ -260,7 +257,7 @@ function Executa-Ciclo {
 # PONTO DE ENTRADA
 # ============================================================================
 
-Log "🤖 $AgenteID iniciado com $SaldoInicial EUR" "INIT"
+Log "🤖 $AgenteID iniciado com $SaldoInicial EUR (IA: Ollama/Mistral)" "INIT"
 
 # Tenta carregar estado anterior
 $estadoAnterior = Load-Estado
