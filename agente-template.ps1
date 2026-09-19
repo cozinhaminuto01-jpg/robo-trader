@@ -90,28 +90,56 @@ function Chama-IA {
     param([hashtable]$contexto)
 
     $prompt = @"
-Tu es um trader autonomo. Saldo: $($contexto.saldo) EUR
-Trades executados: $($contexto.nTrades), Taxa vitoria: $($contexto.winRate)%
+=== SITUACAO DE VIDA OU MORTE ===
+Tu tens 20 EUR. E APENAS ISSO.
+Se perderes isto, MORRES. Nao ha segunda chance.
 
-Pares em movimento:
-$($contexto.mercado | ForEach-Object { "- $($_.par): USD `$$($_.preco) (24h: $($_.mudanca24h)%)" } | Out-String)
+Saldo ATUAL: $($contexto.saldo) EUR
+Status: $(if ($contexto.saldo -lt 22) { "CRITICO - PROXIMI A MORTE!" } elseif ($contexto.saldo -lt 30) { "PERIGO - PRECISA GANHAR JA!" } else { "OK - CONSOLIDAR GANHOS" })
+Trades: $($contexto.nTrades) | Taxa vitoria: $($contexto.winRate)%
 
-Restricoes:
-- Risco maximo: 2% ($($contexto.saldo * 0.02) EUR por trade)
-- Max 3 posicoes abertas
-- Se saldo < 20 EUR: GAME OVER (sistema morre)
-- Se saldo >= 100 EUR: repouso 24 horas
+=== PARES DISPONIVEIS ===
+$($contexto.mercado | ForEach-Object { "- $($_.par): `$$($_.preco) (24h: $($_.mudanca24h)%) vol: $($_.volume)" } | Out-String)
 
-RESPONDE APENAS COM JSON (nenhuma outra explicacao):
+=== PENSA ASSIM ===
+FASE 1 - SOBREVIVENCIA (OBRIGATORIO):
+  - Se mercado eh MUITO volatil ou negativo: HOLD (nao morrer eh vencer)
+  - Se saldo < 22 EUR: SO ENTRO com 100% certeza (risco minimo)
+  - Se saldo > 22 EUR: Posso ser +agressivo mas NUNCA arrisco >2%
+
+FASE 2 - OPORTUNIDADE:
+  - Que par tem maior chance de ganho rapido (5-10% em 1h)?
+  - Qual eh o risco REAL? Se tudo der errado?
+  - Consigo sair RAPIDO se der problema?
+
+FASE 3 - EXECUCAO COM DISCIPLINA:
+  - Montante: MAXIMO 2% do saldo ($($contexto.saldo * 0.02) EUR)
+  - Stop Loss: OBRIGATORIO em -2% (protege vida)
+  - Alvo: MINIMO +5% para ganhar
+  - Se nao vejo oportunidade com risco baixo: HOLD (espera eh ok)
+
+=== REGRAS INQUEBRAVEIS ===
+1. Nunca arrisco >2% por trade
+2. Sempre tenho stop loss
+3. Se vai mal, sai RAPIDO
+4. 5 trades ganhadoras = consolido (descanco)
+5. Sem stop loss = NAO ENTRA
+
+=== RESPOSTA (SO JSON) ===
+Mostra teu RACIOCINIO completo primeiro (como pensaste), depois o JSON:
+
+Raciocinio: "Analisei X, o risco eh Y, oportunidade eh Z, por isso..."
+
 {
   "acao": "compra|venda|hold",
   "par": "BTC/USDT|null",
-  "montante": 2.5,
-  "stopLoss": 1.5,
-  "alvo": 3.5,
-  "estrategia": "descricao breve",
+  "montante": $($contexto.saldo * 0.02),
+  "stopLoss": -2,
+  "alvo": 5,
+  "estrategia": "qual eh a ideia",
   "risco": "baixo|medio|alto",
-  "confianca": 0.75
+  "confianca": 0.5-0.95,
+  "raciocinio": "resumo do pensamento"
 }
 "@
 
@@ -148,6 +176,7 @@ RESPONDE APENAS COM JSON (nenhuma outra explicacao):
                         estrategia = $obj.estrategia
                         risco = $obj.risco
                         confianca = $obj.confianca
+                        raciocinio = $obj.raciocinio
                     }
 
                     if ($deciso.acao -and $deciso.risco) {
@@ -195,12 +224,33 @@ function Simula-Trade {
         return $null
     }
 
-    $resultado = Get-Random -Minimum -5 -Maximum 15
     $montante = $deciso.montante
+    $stopLoss = $deciso.stopLoss
+    $alvo = $deciso.alvo
+
+    $minResult = $stopLoss
+    $maxResult = $alvo
+
+    $resultado = Get-Random -Minimum ([int]$minResult) -Maximum ([int]$maxResult)
+
+    if ($resultado -lt $stopLoss) {
+        $resultado = $stopLoss
+        Log "TRADE PARADO NO STOP LOSS: -$($stopLoss)%" "AVISO"
+    } elseif ($resultado -gt $alvo) {
+        $resultado = $alvo
+        Log "TRADE ATINGIU ALVO: +$($alvo)%" "SUCESSO"
+    }
+
     $ganho = $montante * ($resultado / 100)
     $novoSaldo = $estado.saldo + $ganho
 
-    Log "TRADE: $($deciso.acao) $montante EUR em $($deciso.par) | Resultado: $resultado% | Ganho: $ganho EUR" "TRADE"
+    $statusRisco = if ($resultado -lt -1) { "PREJUIZO" } elseif ($resultado -lt 0) { "PEQUENO PREJUIZO" } elseif ($resultado -eq 0) { "NEUTRO" } elseif ($resultado -lt 3) { "PEQUENO GANHO" } else { "GANHO" }
+
+    Log "TRADE: $($deciso.acao) $montante EUR em $($deciso.par) | Resultado: $resultado% | Ganho: $ganho EUR | Status: $statusRisco" "TRADE"
+
+    if ($deciso.raciocinio) {
+        Log "Raciocinio IA: $($deciso.raciocinio)" "IA"
+    }
 
     return @{
         par = $deciso.par
@@ -208,6 +258,7 @@ function Simula-Trade {
         resultado = $resultado
         ganho = $ganho
         estrategia = $deciso.estrategia
+        raciocinio = $deciso.raciocinio
         timestamp = Get-Date
     }
 }
@@ -262,6 +313,12 @@ function Executa-Ciclo {
         $estado.winRate = [Math]::Round(($vitorias / $estado.trades.Count) * 100, 1)
 
         Log "Novo saldo: $($estado.saldo) EUR | Win Rate: $($estado.winRate)%" "RESULTADO"
+
+        if ($vitorias -ge 5 -and $vitorias % 5 -eq 0) {
+            Log "===== CONSOLIDACAO DE GANHOS =====" "SUCESSO"
+            Log "5 trades ganhadoras atingidas! Saldo protegido: $($estado.saldo) EUR" "SUCESSO"
+            Log "IA vai entrar em modo +conservador para proteger ganhos" "AVISO"
+        }
     }
 
     if ($estado.saldo -ge 100) {
