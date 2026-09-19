@@ -300,7 +300,7 @@ function Cria-NovoAgente {
 # ============================================================================
 
 function Simula-Trade {
-    param([hashtable]$deciso)
+    param([hashtable]$deciso, [decimal]$saldoAtual)
 
     if ($deciso.acao -eq "hold") {
         Log "IA decidiu: HOLD - Aguardando proxima oportunidade" "INFO"
@@ -314,9 +314,26 @@ function Simula-Trade {
     $alvo = [int]$deciso.alvo
     $stopLoss = if ($deciso.stopLoss) { [int]$deciso.stopLoss } else { -100 }
 
+    # Uma exchange real nunca executa uma ordem maior que o saldo disponivel na conta -
+    # isto nao e uma regra de estrategia, e um limite fisico de qualquer conta real
+    if ($montante -gt $saldoAtual) {
+        Log "AVISO: Pediu para investir $montante EUR mas so ha $saldoAtual EUR na conta. Uma exchange real limitaria a ordem ao saldo disponivel." "AVISO"
+        $montante = $saldoAtual
+    }
+
+    # O resultado de um trade nunca pode variar mais que -100% (perda total) ou +100%;
+    # isto evita percentagens irrealistas quando stopLoss/alvo sao escritos como precos
+    # absolutos em vez de percentagens - nao dita como definir stop loss, so mantem o
+    # resultado da simulacao dentro do fisicamente possivel
+    $stopLoss = [Math]::Min([Math]::Max($stopLoss, -100), 100)
+    $alvo = [Math]::Min([Math]::Max($alvo, -100), 100)
+
     # Get-Random exige Minimum < Maximum ou o script crasha; isto e apenas para o
     # simulador nao rebentar com valores inesperados, nao impoe nenhuma regra de trading
     if ($stopLoss -ge $alvo) {
+        if ($stopLoss -ge 100) {
+            $stopLoss = 99
+        }
         $alvo = $stopLoss + 1
     }
 
@@ -425,7 +442,7 @@ function Executa-Ciclo {
         }
     }
 
-    $trade = Simula-Trade -deciso $deciso
+    $trade = Simula-Trade -deciso $deciso -saldoAtual $estado.saldo
     if ($trade) {
         $estado.trades += $trade
         $estado.saldo += $trade.ganho
