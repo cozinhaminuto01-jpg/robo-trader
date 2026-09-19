@@ -452,6 +452,16 @@ function Executa-Ciclo {
 
 Log "Agente iniciado com $SaldoInicial EUR (IA: Ollama/Mistral)" "INIT"
 
+# Forca o Ollama a descarregar qualquer sessao/contexto anterior do modelo, para
+# garantir que a IA comeca mesmo do zero, sem vestigios de conversas passadas
+# que nao sejam a memoria que nos proprios controlamos (estado.historico)
+try {
+    Log "A limpar sessao anterior do Ollama (mistral)..." "INIT"
+    & ollama stop mistral 2>&1 | Out-Null
+} catch {
+    Log "Aviso: nao foi possivel limpar sessao do Ollama (pode nao estar a correr ainda): $_" "AVISO"
+}
+
 $estadoAnterior = Load-Estado
 if ($estadoAnterior) {
     $estado = $estadoAnterior
