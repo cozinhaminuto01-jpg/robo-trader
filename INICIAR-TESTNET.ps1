@@ -76,7 +76,8 @@ while ($true) {
         $currentFile = $logFiles[0].FullName
 
         if ($lastFile -ne $currentFile) {
-            Write-Host "`n📝 Lendo: $($logFiles[0].Name)" -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host "Lendo: $($logFiles[0].Name)" -ForegroundColor Yellow
             $lastFile = $currentFile
             $lastLines = 0
         }
@@ -99,13 +100,15 @@ while ($true) {
     # Aguarda um pouco antes de verificar novamente
     Start-Sleep -Milliseconds 500
 
-    # Verifica se jobs ainda estão a rodar
+    # Verifica se jobs ainda estao a rodar
     if ((Get-Job -ID $fundJob.ID -ErrorAction SilentlyContinue | Where-Object { $_.State -eq "Running" }) -eq $null) {
-        Write-Host "`n❌ Fund Manager parou!" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Fund Manager parou!" -ForegroundColor Red
         break
     }
     if ((Get-Job -ID $agente1Job.ID -ErrorAction SilentlyContinue | Where-Object { $_.State -eq "Running" }) -eq $null) {
-        Write-Host "`n❌ Agente 1 parou!" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Agente 1 parou!" -ForegroundColor Red
         break
     }
 }
