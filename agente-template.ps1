@@ -193,18 +193,26 @@ CRITICO:
             $jsonMatch = $outputText -match '\{[\s\S]*?"acao"[\s\S]*?\}'
             if ($jsonMatch) {
                 $jsonText = $matches[0]
-                # FIX ENCODING: Remove caracteres estranhos (n+úo, tend+¬ncia, etc)
-                $jsonText = $jsonText -replace '\+[a-f0-9\u0080-￿]', ''
-                $jsonText = $jsonText -replace "`r`n", ""
-                $jsonText = $jsonText -replace "`n", ""
+                # FIX ENCODING: Remove TODOS os caracteres estranhos agresivamente
+                # Remove + seguido de caracteres (n+úo, tend+¬ncia, etc)
+                $jsonText = $jsonText -replace '\+.', ''
+                # Remove caracteres não-ASCII
+                $jsonText = [System.Text.RegularExpressions.Regex]::Replace($jsonText, '[^\x20-\x7E":\[\]{}]', '')
+                # Limpa whitespace
+                $jsonText = $jsonText -replace "`r`n", " "
+                $jsonText = $jsonText -replace "`n", " "
                 $jsonText = $jsonText -replace ' EUR', ''
                 $jsonText = $jsonText -replace '%', ''
-                # FIX: Limpa espaços múltiplos (ANTES de colons/commas)
+                # Remove múltiplos espaços
                 $jsonText = $jsonText -replace '\s+', ' '
-                # Remove espaços ANTES de : , } para JSON válido
+                # Remove espaços ANTES de : , } [ ] para JSON válido
                 $jsonText = $jsonText -replace '\s+:', ':'
                 $jsonText = $jsonText -replace '\s+,', ','
                 $jsonText = $jsonText -replace '\s+}', '}'
+                $jsonText = $jsonText -replace '\s+\]', ']'
+                $jsonText = [System.Text.RegularExpressions.Regex]::Replace($jsonText, '"\s+:', '":')
+                # Trim
+                $jsonText = $jsonText.Trim()
                 Log "JSON extraido: $jsonText" "DEBUG"
                 try {
                     $obj = $jsonText | ConvertFrom-Json
