@@ -128,15 +128,19 @@ Responde EM JSON VALIDO (sem explicacao adicional):
         $output = & ollama run mistral $prompt 2>&1
 
         if ($output) {
-            $jsonMatch = $output | Select-String -Pattern '\{[^{}]*"acao"[^{}]*\}' -AllMatches
+            $jsonStr = $output | Select-String -Pattern '\{.*"acao".*\}' -AllMatches
 
-            if ($jsonMatch) {
-                $jsonStr = $jsonMatch.Matches[0].Value
-                $deciso = $jsonStr | ConvertFrom-Json
+            if ($jsonStr) {
+                try {
+                    $jsonText = $jsonStr.Matches[0].Value
+                    $deciso = $jsonText | ConvertFrom-Json
 
-                if ($deciso.acao -and $deciso.risco) {
-                    Log "IA (Ollama/Mistral): Acao=$($deciso.acao), Par=$($deciso.par), Confianca=$($deciso.confianca)" "IA"
-                    return $deciso
+                    if ($deciso.acao -and $deciso.risco) {
+                        Log "IA (Ollama/Mistral): Acao=$($deciso.acao), Par=$($deciso.par), Confianca=$($deciso.confianca)" "IA"
+                        return $deciso
+                    }
+                } catch {
+                    Log "Erro ao fazer parse do JSON: $_" "AVISO"
                 }
             }
         }
