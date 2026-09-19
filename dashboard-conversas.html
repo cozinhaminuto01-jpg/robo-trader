@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>💭 IA - Conversas em Tempo Real</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Courier New', monospace;
+            background: #0a0e14;
+            color: #d0d0d0;
+            padding: 15px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        h1 {
+            font-size: 22px;
+        }
+
+        .stats {
+            display: flex;
+            gap: 20px;
+            font-size: 12px;
+        }
+
+        .stat {
+            background: rgba(255,255,255,0.1);
+            padding: 8px 12px;
+            border-radius: 4px;
+        }
+
+        .stat label {
+            display: block;
+            opacity: 0.8;
+            font-size: 10px;
+        }
+
+        .stat value {
+            font-weight: bold;
+            font-size: 16px;
+        }
+
+        .conversation-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .panel {
+            background: #1a1f26;
+            border: 1px solid #2a3140;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            height: 600px;
+        }
+
+        .panel-header {
+            background: #252d37;
+            padding: 12px 15px;
+            border-bottom: 1px solid #2a3140;
+            font-weight: bold;
+            font-size: 13px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .panel-header .status {
+            font-size: 10px;
+            color: #999;
+        }
+
+        .panel-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 15px;
+            font-size: 11px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .prompt-section {
+            background: #1a2a1a;
+            border-left: 3px solid #10b981;
+            padding: 12px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+        }
+
+        .response-section {
+            background: #2a1a1a;
+            border-left: 3px solid #f59e0b;
+            padding: 12px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+        }
+
+        .label {
+            font-weight: bold;
+            color: #667eea;
+            font-size: 10px;
+            text-transform: uppercase;
+            margin-bottom: 5px;
+            display: block;
+        }
+
+        .prompt-section .label {
+            color: #10b981;
+        }
+
+        .response-section .label {
+            color: #f59e0b;
+        }
+
+        .json-response {
+            background: #1a1f26;
+            border: 1px solid #2a3140;
+            padding: 12px;
+            margin-top: 10px;
+            border-radius: 4px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .json-response .label {
+            color: #667eea;
+        }
+
+        .trade-result {
+            background: #1a2a1a;
+            border-left: 3px solid #10b981;
+            padding: 12px;
+            margin-top: 10px;
+            border-radius: 4px;
+        }
+
+        .trade-result.loss {
+            background: #2a1a1a;
+            border-left-color: #ef4444;
+        }
+
+        .trade-result .label {
+            color: #10b981;
+        }
+
+        .trade-result.loss .label {
+            color: #ef4444;
+        }
+
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #1a1f26;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #667eea;
+            border-radius: 3px;
+        }
+
+        .refresh-info {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            font-size: 11px;
+            color: #999;
+            background: rgba(0,0,0,0.5);
+            padding: 8px 12px;
+            border-radius: 4px;
+        }
+
+        .blink {
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0.5; }
+        }
+
+        @media (max-width: 1024px) {
+            .conversation-container {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div>
+                <h1>💭 IA Trader - Conversas em Tempo Real</h1>
+                <div style="font-size: 11px; margin-top: 5px; opacity: 0.8;">Vê o que a IA está a pensar e o que o Mistral responde</div>
+            </div>
+            <div class="stats">
+                <div class="stat">
+                    <label>Ciclo Actual</label>
+                    <value id="currentCycle">0</value>
+                </div>
+                <div class="stat">
+                    <label>Saldo</label>
+                    <value id="currentBalance">20.00 EUR</value>
+                </div>
+                <div class="stat">
+                    <label>Status</label>
+                    <value id="status" style="color: #10b981;">Iniciando</value>
+                </div>
+            </div>
+        </header>
+
+        <div class="conversation-container">
+            <!-- PROMPT ENVIADO -->
+            <div class="panel">
+                <div class="panel-header">
+                    ✍️ PROMPT ENVIADO À IA (Mistral)
+                    <span class="status"><span class="blink">●</span> Enviando...</span>
+                </div>
+                <div class="panel-body" id="promptPanel">
+                    <div style="color: #999;">À espera de dados...</div>
+                </div>
+            </div>
+
+            <!-- RESPOSTA RECEBIDA -->
+            <div class="panel">
+                <div class="panel-header">
+                    💬 RESPOSTA DA IA (Mistral)
+                    <span class="status"><span class="blink">●</span> Respondendo...</span>
+                </div>
+                <div class="panel-body" id="responsePanel">
+                    <div style="color: #999;">À espera de dados...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- RESUMO DA DECISÃO -->
+        <div class="panel" style="height: auto; max-height: 300px;">
+            <div class="panel-header">
+                📊 DECISÃO FINAL & RESULTADO
+            </div>
+            <div class="panel-body" id="decisionPanel" style="max-height: 250px;">
+                <div style="color: #999;">À espera do primeiro ciclo...</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="refresh-info">
+        Auto-refresh: <span class="blink">●</span> Activo | <span id="lastUpdate">--:--:--</span>
+    </div>
+
+    <script>
+        async function getLatestLog() {
+            try {
+                // Tenta ler a pasta de logs via API (nota: isto é simulado)
+                // Em produção real, seria via WebSocket ou backend
+                const response = await fetch('./logs');
+                return response;
+            } catch (e) {
+                return null;
+            }
+        }
+
+        async function loadAgentState() {
+            try {
+                const response = await fetch('./estado-Agente_1.json');
+                if (!response.ok) return null;
+                return await response.json();
+            } catch {
+                return null;
+            }
+        }
+
+        async function updateConversation() {
+            const state = await loadAgentState();
+            if (!state) {
+                document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString('pt-PT');
+                return;
+            }
+
+            // Atualizar stats
+            document.getElementById('currentBalance').textContent = `${state.saldo.toFixed(2)} EUR`;
+            document.getElementById('currentCycle').textContent = state.trades ? state.trades.length : '0';
+
+            // Simular dados da conversa (em produção, viria dos logs)
+            const lastTrade = state.trades && state.trades.length > 0 ? state.trades[state.trades.length - 1] : null;
+
+            // PROMPT SIMULADO
+            const promptContent = `
+=== SITUACAO REAL: VIDA OU MORTE ===
+Tu es uma IA trader. Tens ${state.saldo.toFixed(2)} EUR. E SÓ ISSO.
+
+OBJECTIVOS CLAROS:
+- Se saldo cair abaixo de 20 EUR: MORRES (game over)
+- Se saldo atingir 100 EUR: descansas 24h depois reinicia
+- Tens acesso à Binance, a cada 1 minuto podes revisar e decidir
+
+SALDO ACTUAL: ${state.saldo.toFixed(2)} EUR
+Trades executados: ${state.trades ? state.trades.length : 0}
+Taxa de vitória: ${state.winRate}%
+
+MERCADO ACTUAL (pares em movimento):
+- ETH/USDT: $2280 (mudanca 24h: 1.8%)
+- XRP/USDT: $2.45 (mudanca 24h: 0.5%)
+- ADA/USDT: $1.15 (mudanca 24h: 3.2%)
+- SOL/USDT: $185 (mudanca 24h: -1.2%)
+
+=== NENHUMA RESTRICAO IMPOSTA ===
+TU DECIDES: Quanto arriscar, que estrategia usar, quando entrar/sair, com/sem stop loss
+
+=== PENSA ASSIM ===
+1. ANALISA: Qual eh a melhor estrategia AGORA para nao morrer?
+2. CONVERSA COMIGO: Explica teu raciocinio
+3. DECIDE: Que fazes agora?
+
+RESPONDE COM JSON + RACIOCINIO
+            `;
+
+            document.getElementById('promptPanel').innerHTML = `
+                <div class="prompt-section">
+                    <span class="label">📤 Prompt Enviado ao Mistral:</span>
+                    ${promptContent}
+                </div>
+            `;
+
+            // RESPOSTA SIMULADA
+            let responseContent = '<div style="color: #999;">À espera da próxima resposta do Mistral...</div>';
+            if (lastTrade) {
+                responseContent = `
+                    <div class="response-section">
+                        <span class="label">💭 Raciocínio da IA:</span>
+                        ${lastTrade.raciocinio || 'Estou a analisar o mercado...'}
+                    </div>
+
+                    <div class="json-response">
+                        <span class="label">📋 JSON Decisão:</span>
+                        <pre style="font-size: 10px; margin-top: 8px;">${JSON.stringify({
+                            acao: lastTrade.acao,
+                            par: lastTrade.par,
+                            montante: lastTrade.montante,
+                            stopLoss: lastTrade.stopLoss || 'null',
+                            alvo: lastTrade.alvo,
+                            estrategia: lastTrade.estrategia,
+                            risco: lastTrade.risco,
+                            confianca: lastTrade.confianca,
+                            raciocinio: lastTrade.raciocinio
+                        }, null, 2)}</pre>
+                    </div>
+                `;
+            }
+            document.getElementById('responsePanel').innerHTML = responseContent;
+
+            // DECISÃO FINAL
+            if (lastTrade) {
+                const resultClass = lastTrade.ganho > 0 ? '' : 'loss';
+                const resultSign = lastTrade.ganho > 0 ? '+' : '';
+                const actionLabel = {
+                    'compra': '🟢 COMPRA',
+                    'venda': '🔴 VENDA',
+                    'hold': '⏸️ HOLD'
+                }[lastTrade.acao] || lastTrade.acao;
+
+                const decisionHTML = `
+                    <div class="trade-result ${resultClass}">
+                        <span class="label">📊 ${actionLabel} ${lastTrade.montante} EUR em ${lastTrade.par}</span>
+                        <div style="margin-top: 8px;">
+                            <div><strong>Estratégia:</strong> ${lastTrade.estrategia}</div>
+                            <div><strong>Risco:</strong> ${lastTrade.risco}</div>
+                            <div><strong>Confiança:</strong> ${(lastTrade.confianca * 100).toFixed(0)}%</div>
+                        </div>
+                    </div>
+
+                    <div class="trade-result ${resultClass}">
+                        <span class="label">📈 RESULTADO DO TRADE</span>
+                        <div style="margin-top: 8px;">
+                            <div><strong>Resultado:</strong> ${lastTrade.resultado}%</div>
+                            <div><strong>Ganho/Perda:</strong> <span style="font-weight: bold; color: ${lastTrade.ganho > 0 ? '#10b981' : '#ef4444'};">${resultSign}${lastTrade.ganho.toFixed(2)} EUR</span></div>
+                            <div><strong>Novo Saldo:</strong> ${(state.saldo).toFixed(2)} EUR</div>
+                            <div><strong>Timestamp:</strong> ${new Date(lastTrade.timestamp).toLocaleString('pt-PT')}</div>
+                        </div>
+                    </div>
+                `;
+                document.getElementById('decisionPanel').innerHTML = decisionHTML;
+            }
+
+            document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString('pt-PT');
+        }
+
+        // Auto-refresh a cada 1 segundo
+        setInterval(updateConversation, 1000);
+        updateConversation();
+    </script>
+</body>
+</html>
