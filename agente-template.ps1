@@ -150,6 +150,9 @@ No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos
 
         if ($output) {
             $outputText = $output -join "`n"
+            # Remove codigos ANSI de escape do terminal (ex: [2D[K) antes de qualquer uso,
+            # para nao poluir nem o parsing nem a memoria guardada entre ciclos
+            $outputText = [System.Text.RegularExpressions.Regex]::Replace($outputText, '\x1b(\[[0-9;?]*[a-zA-Z]|\][^\x07]*\x07)', '')
             Log "========== RESPOSTA COMPLETA DO MISTRAL ==========" "IA"
             Log $outputText "IA"
             Log "========== FIM RESPOSTA ==========" "IA"
@@ -304,6 +307,12 @@ function Simula-Trade {
     $montante = $deciso.montante
     $alvo = [int]$deciso.alvo
     $stopLoss = if ($deciso.stopLoss) { [int]$deciso.stopLoss } else { -100 }
+
+    # Get-Random exige Minimum < Maximum ou o script crasha; isto e apenas para o
+    # simulador nao rebentar com valores inesperados, nao impoe nenhuma regra de trading
+    if ($stopLoss -ge $alvo) {
+        $alvo = $stopLoss + 1
+    }
 
     $resultado = Get-Random -Minimum $stopLoss -Maximum $alvo
 
