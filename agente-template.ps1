@@ -11,6 +11,18 @@ param(
     [string]$ConfigPath = ".\config-testnet.json"
 )
 
+# FIX ENCODING: O Windows PowerShell 5.1 escreve na consola e em ficheiros usando o
+# codepage local (ANSI) por omissao, nao UTF-8. Como o texto (respostas do Mistral,
+# acentos em portugues) e sempre UTF-8, isto corrompe visualmente tudo o que e escrito
+# (ex: "decisao" aparece como "decis+o") mesmo que o texto em memoria esteja correto -
+# nenhuma limpeza de conteudo resolve isto, e um problema de escrita, nao do texto.
+try {
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    $OutputEncoding = [System.Text.Encoding]::UTF8
+} catch {
+    # Em hosts sem consola interativa (ex: corrido como job) isto pode falhar - inofensivo
+}
+
 # Carrega config
 $config = Get-Content $ConfigPath -Encoding UTF8 | ConvertFrom-Json
 
@@ -44,7 +56,7 @@ function Log {
         $linha = "[$ts] [$tipo] $msg"
         Write-Host "[$agenteStr] $linha" -ErrorAction SilentlyContinue
         if ($logFile -and (Test-Path (Split-Path $logFile))) {
-            Add-Content -Path $logFile -Value $linha -ErrorAction SilentlyContinue
+            Add-Content -Path $logFile -Value $linha -Encoding UTF8 -ErrorAction SilentlyContinue
         }
     } catch {
         Write-Host "Log error: $_"
@@ -824,7 +836,12 @@ if ($estadoAnterior) {
     Log "Estado anterior carregado" "INFO"
 }
 
-$ciclo = 1
+# Continua a contagem de ciclos de onde ficou (nao reinicia para 1 a cada reinicio do
+# processo) - senao os logs mostram numeros de ciclo repetidos apos um crash/reinicio
+# do supervisor, o que confunde a leitura do historico
+$ciclo = if ($estado.ciclosHistorico -and $estado.ciclosHistorico.Count -gt 0) {
+    ($estado.ciclosHistorico | Select-Object -Last 1).ciclo + 1
+} else { 1 }
 while ($true) {
     try {
         Executa-Ciclo -ciclo $ciclo
