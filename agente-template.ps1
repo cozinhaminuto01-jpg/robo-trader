@@ -242,12 +242,15 @@ CRITICO:
                     $jsonText = $jsonText -replace '\s+\]', ']'
 
                     # Step 9: AGGRESSIVE - Remove ANY character not valid in JSON
-                    # Valid: {}[]:,"  + letters, digits, minus, dot, space
+                    # Valid: {}[]:,"  + letters, digits, minus, dot, slash, space
                     # Removes truncation artifacts and control chars
-                    $jsonText = [System.Text.RegularExpressions.Regex]::Replace($jsonText, '[^{}\[\]:,"a-zA-Z0-9\.\-\s]', '')
+                    $jsonText = [System.Text.RegularExpressions.Regex]::Replace($jsonText, '[^{}\[\]:,"a-zA-Z0-9\.\-\/\s]', '')
 
-                    # Step 10: Fix missing quotes around field names (truncation: "acao: becomes "acao":)
+                    # Step 10: Fix missing closing quote after field name (truncation: "acao: becomes "acao":)
+                    # Match: quote, letters, colon (no closing quote) followed by space and content
                     $jsonText = $jsonText -replace '"([a-z]+):\s+', '"$1": '
+                    # Also fix: quote, letters, quote, space, quote (like "alvo" "alvo" -> "alvo")
+                    $jsonText = $jsonText -replace '"([a-z]+)"\s+"', '"$1"'
 
                     # Step 11: Fix quoted numbers and null values (Mistral sometimes wraps them in quotes)
                     # "5.0" -> 5.0, "20" -> 20, "null" -> null
