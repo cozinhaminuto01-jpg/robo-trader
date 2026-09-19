@@ -241,17 +241,21 @@ CRITICO:
                     $jsonText = $jsonText -replace '\s+}', '}'
                     $jsonText = $jsonText -replace '\s+\]', ']'
 
-                    # Step 9: Remove remaining control/truncation characters (like [alv, [confia)
-                    # These are line truncation artifacts: [2D[K, [7D[K, etc that slip through
-                    $jsonText = [System.Text.RegularExpressions.Regex]::Replace($jsonText, '\[\w+', '')
+                    # Step 9: AGGRESSIVE - Remove ANY character not valid in JSON
+                    # Valid: {}[]:,"  + letters, digits, minus, dot, space
+                    # Removes truncation artifacts and control chars
+                    $jsonText = [System.Text.RegularExpressions.Regex]::Replace($jsonText, '[^{}\[\]:,"a-zA-Z0-9\.\-\s]', '')
 
-                    # Step 10: Fix quoted numbers and null values (Mistral sometimes wraps them in quotes)
+                    # Step 10: Fix missing quotes around field names (truncation: "acao: becomes "acao":)
+                    $jsonText = $jsonText -replace '"([a-z]+):\s+', '"$1": '
+
+                    # Step 11: Fix quoted numbers and null values (Mistral sometimes wraps them in quotes)
                     # "5.0" -> 5.0, "20" -> 20, "null" -> null
                     $jsonText = $jsonText -replace '": "(\d+\.?\d*)"', ': $1'  # Remove quotes from numbers after colon
                     $jsonText = $jsonText -replace '": "null"', ': null'       # Fix "null" to null
-                    $jsonText = $jsonText -replace '": "([a-z]+)"', ': "$1"'   # Keep quotes for strings but clean them up
+                    $jsonText = $jsonText -replace '": "([a-z]+)"', ': "$1"'   # Keep quotes for strings
 
-                    # Step 11: Final trim
+                    # Step 12: Final trim
                     $jsonText = $jsonText.Trim()
 
                     Log "JSON extraido (limpo): $jsonText" "DEBUG"
