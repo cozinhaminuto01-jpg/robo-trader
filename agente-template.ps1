@@ -209,7 +209,30 @@ CRITICO:
                     Log "Erro JSON parse: $_" "AVISO"
                 }
             } else {
-                Log "Regex nao encontrou JSON na resposta" "AVISO"
+                Log "Regex nao encontrou JSON na resposta. Tentando extrair do texto..." "AVISO"
+
+                $acao = if ($outputText -match 'acao["\s:]*([a-z]+)') { $matches[1] } else { "hold" }
+                $par = if ($outputText -match 'par["\s:]*([A-Z0-9/]+)') { $matches[1] } else { $null }
+                $montante = if ($outputText -match 'montante["\s:]*(\d+\.?\d*)') { [decimal]$matches[1] } else { 5.0 }
+                $stopLoss = if ($outputText -match 'stopLoss["\s:]*(\d+)') { [int]$matches[1] } else { $null }
+                $alvo = if ($outputText -match 'alvo["\s:]*(\d+)') { [int]$matches[1] } else { 10 }
+                $risco = if ($outputText -match 'risco["\s:]*([a-z]+)') { $matches[1] } else { "baixo" }
+                $confianca = if ($outputText -match 'confi[a-z]*["\s:]*(\d\.?\d*)') { [decimal]$matches[1] } else { 0.5 }
+
+                Log "Valores extraidos do texto: Acao=$acao, Par=$par, Montante=$montante, Risco=$risco" "INFO"
+
+                return @{
+                    acao = $acao
+                    par = $par
+                    montante = $montante
+                    stopLoss = $stopLoss
+                    alvo = $alvo
+                    estrategia = "Extraida do texto"
+                    risco = $risco
+                    confianca = $confianca
+                    raciocinio = "Valores extraidos da resposta textual"
+                    criarAgentes = 0
+                }
             }
         }
 
