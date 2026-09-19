@@ -181,9 +181,13 @@ No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos
             Log $outputText "IA"
             Log "========== FIM RESPOSTA ==========" "IA"
 
-            $jsonMatch = $outputText -match '\{[\s\S]*?"?acao"?\s*:[\s\S]*?\}'
+            # Usa o ULTIMO bloco de decisao encontrado, nao o primeiro: as vezes ela escreve
+            # uma decisao, reconsidera e escreve outra mais a frente na mesma resposta -
+            # a ultima e a que reflete a decisao final dela, nao um rascunho anterior
+            $todosOsBlocos = [System.Text.RegularExpressions.Regex]::Matches($outputText, '\{[\s\S]*?"?acao"?\s*:[\s\S]*?\}')
+            $jsonMatch = $todosOsBlocos.Count -gt 0
             if ($jsonMatch) {
-                $jsonText = $matches[0]
+                $jsonText = $todosOsBlocos[$todosOsBlocos.Count - 1].Value
                 Log "JSON bruto extraido: $jsonText" "DEBUG"
 
                 # FIX: DIRECT FIELD EXTRACTION VIA REGEX (bypasses ConvertFrom-Json entirely)
