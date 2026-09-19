@@ -328,8 +328,12 @@ function Cria-NovoAgente {
 function Simula-Trade {
     param([hashtable]$deciso, [decimal]$saldoAtual)
 
-    if ($deciso.acao -eq "hold") {
-        Log "IA decidiu: HOLD - Aguardando proxima oportunidade" "INFO"
+    # Ela nao e ensinada a dizer "hold" especificamente - usa as suas proprias palavras
+    # para dizer "nao fazer nada agora" (manter, aguardar, esperar, etc). Reconhece os
+    # sinonimos mais comuns em portugues para nao fabricar um trade que ela nao pediu.
+    $semAcaoNova = @("hold", "manter", "aguardar", "esperar", "nada", "aguardando", "esperando")
+    if ($semAcaoNova -contains $deciso.acao) {
+        Log "IA decidiu nao abrir novo trade (acao='$($deciso.acao)') - Aguardando proxima oportunidade" "INFO"
         if ($deciso.raciocinio) {
             Log "Razao: $($deciso.raciocinio)" "IA"
         }
