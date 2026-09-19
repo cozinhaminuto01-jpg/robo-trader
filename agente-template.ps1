@@ -194,26 +194,29 @@ CRITICO:
             if ($jsonMatch) {
                 $jsonText = $matches[0]
 
-                # FIX: COMPREHENSIVE JSON CLEANING (Handles ALL Unicode spaces and encoding issues)
+                # FIX: COMPREHENSIVE JSON CLEANING (Handles ALL Unicode spaces, ANSI codes, and encoding issues)
                 try {
-                    # Step 1: Remove encoding artifacts like n+úo, tend+¬ncia
+                    # Step 1: Remove ANSI escape codes from terminal output (e.g., [2D[K, [7D[K)
+                    $jsonText = [System.Text.RegularExpressions.Regex]::Replace($jsonText, '\x1b\[[0-9;]*[a-zA-Z]', '')
+
+                    # Step 2: Remove encoding artifacts like n+úo, tend+¬ncia
                     $jsonText = $jsonText -replace '\+.', ''
 
-                    # Step 2: Normalize ALL whitespace types to regular space
+                    # Step 3: Normalize ALL whitespace types to regular space
                     # .NET Regex: \r, \n, \t, and \p{Zs} for Unicode spaces
                     $jsonText = [System.Text.RegularExpressions.Regex]::Replace($jsonText, '[\r\n\t\p{Zs}]', ' ')
 
-                    # Step 3: Remove control characters that break JSON (but keep space, tab, newline)
+                    # Step 4: Remove control characters that break JSON (but keep space, tab, newline)
                     $jsonText = [System.Text.RegularExpressions.Regex]::Replace($jsonText, '[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '')
 
-                    # Step 4: Remove unwanted units and symbols
+                    # Step 5: Remove unwanted units and symbols
                     $jsonText = $jsonText -replace ' EUR', ''
                     $jsonText = $jsonText -replace '%', ''
 
-                    # Step 5: Collapse ALL consecutive spaces to single space
+                    # Step 6: Collapse ALL consecutive spaces to single space
                     $jsonText = $jsonText -replace ' {2,}', ' '
 
-                    # Step 6: Remove spaces BEFORE JSON syntax
+                    # Step 7: Remove spaces BEFORE JSON syntax
                     $jsonText = $jsonText -replace ' +:', ':'
                     $jsonText = $jsonText -replace ' +,', ','
                     $jsonText = $jsonText -replace ' +}', '}'
@@ -221,13 +224,13 @@ CRITICO:
                     $jsonText = $jsonText -replace ' +\{', '{'
                     $jsonText = $jsonText -replace ' +\[', '['
 
-                    # Step 7: Remove spaces AFTER opening brackets and BEFORE closing
+                    # Step 8: Remove spaces AFTER opening brackets and BEFORE closing
                     $jsonText = $jsonText -replace '\{\s+', '{'
                     $jsonText = $jsonText -replace '\[\s+', '['
                     $jsonText = $jsonText -replace '\s+}', '}'
                     $jsonText = $jsonText -replace '\s+\]', ']'
 
-                    # Step 8: Final trim
+                    # Step 9: Final trim
                     $jsonText = $jsonText.Trim()
 
                     Log "JSON extraido (limpo): $jsonText" "DEBUG"
