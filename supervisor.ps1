@@ -1,4 +1,4 @@
-# ============================================================================
+﻿# ============================================================================
 # SUPERVISOR - Reinicia o agente automaticamente se o processo morrer
 # ============================================================================
 # O agente corre indefinidamente por design, mas processos externos (Ollama a
