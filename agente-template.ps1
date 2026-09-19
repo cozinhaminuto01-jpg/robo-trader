@@ -122,10 +122,12 @@ RESPONDE APENAS COM JSON (nenhuma outra explicacao):
 
         if ($output) {
             $outputText = $output -join "`n"
+            Log "Resposta bruta do Mistral: $($outputText.Substring(0, [Math]::Min(300, $outputText.Length)))" "DEBUG"
 
             $jsonMatch = $outputText -match '\{[^{}]*"acao"[^{}]*\}'
             if ($jsonMatch) {
                 $jsonText = $matches[0]
+                Log "JSON extraido: $jsonText" "DEBUG"
                 try {
                     $deciso = $jsonText | ConvertFrom-Json
 
@@ -134,15 +136,14 @@ RESPONDE APENAS COM JSON (nenhuma outra explicacao):
                         return $deciso
                     }
                 } catch {
-                    Log "Parse error: $_" "AVISO"
+                    Log "Erro JSON parse: $_" "AVISO"
                 }
             } else {
-                Log "Nao conseguiu extrair JSON da resposta" "AVISO"
-                Log "Resposta recebida (primeiros 200 chars): $($outputText.Substring(0, [Math]::Min(200, $outputText.Length)))" "DEBUG"
+                Log "Regex nao encontrou JSON na resposta" "AVISO"
             }
         }
 
-        Log "JSON invalido. Modo hold defensivo." "AVISO"
+        Log "Nao conseguiu extrair JSON valido. Modo hold defensivo." "AVISO"
         return @{
             acao = "hold"
             par = $null
