@@ -319,7 +319,7 @@ function Cria-NovoAgente {
         id = "Agente_$numeroAgente"
         jobId = $job.Id
         capital = $capital
-        criadoEm = Get-Date
+        criadoEm = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
         status = "ativo"
     }
 
@@ -366,13 +366,14 @@ function Simula-Trade {
     }
 
     return @{
+        acao = $deciso.acao
         par = $deciso.par
         montante = $montante
         resultado = $resultado
         ganho = $ganho
         estrategia = $deciso.estrategia
         raciocinio = $deciso.raciocinio
-        timestamp = Get-Date
+        timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
     }
 }
 
@@ -446,7 +447,7 @@ function Executa-Ciclo {
     if ($trade) {
         $estado.trades += $trade
         $estado.saldo += $trade.ganho
-        $estado.ultimaTradaEm = Get-Date
+        $estado.ultimaTradaEm = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
 
         $vitorias = @($estado.trades | Where-Object { $_.ganho -gt 0 }).Count
         $estado.winRate = [Math]::Round(($vitorias / $estado.trades.Count) * 100, 1)
