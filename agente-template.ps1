@@ -264,15 +264,19 @@ No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos
                 # right after the field name so we never match a field name as a substring of a
                 # normal word (e.g. "par" inside "para").
                 try {
-                    $acao = if ($jsonText -match '"?acao"?\s*:\s*"?([a-zA-Z]+)') { $matches[1].ToLower() } else { "hold" }
-                    $par = if ($jsonText -match '"?par"?\s*:\s*"?([A-Za-z0-9]+(?:\s*/\s*[A-Za-z0-9]+)?)') { ($matches[1] -replace '\s', '').ToUpper() } else { $null }
-                    $montante = if ($jsonText -match '"?montante"?\s*:\s*"?(\d+\.?\d*)') { [decimal]$matches[1] } else { 5.0 }
-                    $stopLoss = if ($jsonText -match '"?stopLoss"?\s*:\s*"?(\d+\.?\d*)') { [decimal]$matches[1] } else { $null }
-                    $alvo = if ($jsonText -match '"?alvo"?\s*:\s*"?(\d+\.?\d*)') { [decimal]$matches[1] } else { 10 }
-                    $estrategia = if ($jsonText -match '"?estrategia"?\s*:\s*"([^"]*)"') { $matches[1] } else { "Extraida da IA" }
-                    $risco = if ($jsonText -match '"?risco"?\s*:\s*"?([a-zA-Z]+)') { $matches[1].ToLower() } else { "baixo" }
-                    $confianca = if ($jsonText -match '"?confianca"?\s*:\s*"?(\d+\.?\d*)') { [decimal]$matches[1] } else { 0.5 }
-                    $criarAgentes = if ($jsonText -match '"?criarAgentes"?\s*:\s*"?(\d+)') { [int]$matches[1] } else { 0 }
+                    # Nota: [\s"]* (nao so "?) logo apos os dois pontos, porque o terminal por vezes
+                    # quebra a linha mesmo a meio do valor, duplicando a aspa de cada lado da quebra
+                    # (ex: stopLoss: " seguido de quebra de linha e so depois "1.75) - uma unica aspa
+                    # opcional nao chega, é preciso tolerar varias aspas/espacos misturados seguidos
+                    $acao = if ($jsonText -match '"?acao"?\s*:[\s"]*([a-zA-Z]+)') { $matches[1].ToLower() } else { "hold" }
+                    $par = if ($jsonText -match '"?par"?\s*:[\s"]*([A-Za-z0-9]+(?:\s*/\s*[A-Za-z0-9]+)?)') { ($matches[1] -replace '\s', '').ToUpper() } else { $null }
+                    $montante = if ($jsonText -match '"?montante"?\s*:[\s"]*(\d+\.?\d*)') { [decimal]$matches[1] } else { 5.0 }
+                    $stopLoss = if ($jsonText -match '"?stopLoss"?\s*:[\s"]*(\d+\.?\d*)') { [decimal]$matches[1] } else { $null }
+                    $alvo = if ($jsonText -match '"?alvo"?\s*:[\s"]*(\d+\.?\d*)') { [decimal]$matches[1] } else { 10 }
+                    $estrategia = if ($jsonText -match '"?estrategia"?\s*:[\s"]*([^"]*)"') { $matches[1] } else { "Extraida da IA" }
+                    $risco = if ($jsonText -match '"?risco"?\s*:[\s"]*([a-zA-Z]+)') { $matches[1].ToLower() } else { "baixo" }
+                    $confianca = if ($jsonText -match '"?confianca"?\s*:[\s"]*(\d+\.?\d*)') { [decimal]$matches[1] } else { 0.5 }
+                    $criarAgentes = if ($jsonText -match '"?criarAgentes"?\s*:[\s"]*(\d+)') { [int]$matches[1] } else { 0 }
 
                     # Guarda o texto de raciocinio livre para servir de memoria nos proximos ciclos.
                     # Ela nem sempre coloca a explicacao antes do JSON - as vezes decide primeiro e
@@ -301,13 +305,13 @@ No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos
             } else {
                 Log "Regex nao encontrou JSON na resposta. Tentando extrair do texto..." "AVISO"
 
-                $acao = if ($outputText -match '"?acao"?\s*:\s*"?([a-z]+)') { $matches[1] } else { "hold" }
-                $par = if ($outputText -match '"?par"?\s*:\s*"?([A-Za-z0-9]+(?:\s*/\s*[A-Za-z0-9]+)?)') { ($matches[1] -replace '\s', '').ToUpper() } else { $null }
-                $montante = if ($outputText -match '"?montante"?\s*:\s*"?(\d+\.?\d*)') { [decimal]$matches[1] } else { 5.0 }
-                $stopLoss = if ($outputText -match '"?stopLoss"?\s*:\s*"?(\d+\.?\d*)') { [decimal]$matches[1] } else { $null }
-                $alvo = if ($outputText -match '"?alvo"?\s*:\s*"?(\d+\.?\d*)') { [decimal]$matches[1] } else { 10 }
-                $risco = if ($outputText -match '"?risco"?\s*:\s*"?([a-z]+)') { $matches[1] } else { "baixo" }
-                $confianca = if ($outputText -match '"?confi[a-z]*"?\s*:\s*"?(\d\.?\d*)') { [decimal]$matches[1] } else { 0.5 }
+                $acao = if ($outputText -match '"?acao"?\s*:[\s"]*([a-z]+)') { $matches[1] } else { "hold" }
+                $par = if ($outputText -match '"?par"?\s*:[\s"]*([A-Za-z0-9]+(?:\s*/\s*[A-Za-z0-9]+)?)') { ($matches[1] -replace '\s', '').ToUpper() } else { $null }
+                $montante = if ($outputText -match '"?montante"?\s*:[\s"]*(\d+\.?\d*)') { [decimal]$matches[1] } else { 5.0 }
+                $stopLoss = if ($outputText -match '"?stopLoss"?\s*:[\s"]*(\d+\.?\d*)') { [decimal]$matches[1] } else { $null }
+                $alvo = if ($outputText -match '"?alvo"?\s*:[\s"]*(\d+\.?\d*)') { [decimal]$matches[1] } else { 10 }
+                $risco = if ($outputText -match '"?risco"?\s*:[\s"]*([a-z]+)') { $matches[1] } else { "baixo" }
+                $confianca = if ($outputText -match '"?confi[a-z]*"?\s*:[\s"]*(\d\.?\d*)') { [decimal]$matches[1] } else { 0.5 }
 
                 Log "Valores extraidos do texto: Acao=$acao, Par=$par, Montante=$montante, Risco=$risco" "INFO"
 
