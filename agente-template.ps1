@@ -116,13 +116,19 @@ RESPONDE APENAS COM JSON (nenhuma outra explicacao):
 "@
 
     try {
+        Log "========== PROMPT ENVIADO AO MISTRAL ==========" "IA"
+        Log $prompt "IA"
+        Log "========== FIM PROMPT ==========" "IA"
+
         Log "Consultando Ollama/Mistral (IA local)..." "IA"
 
         $output = & ollama run mistral $prompt 2>&1
 
         if ($output) {
             $outputText = $output -join "`n"
-            Log "Resposta bruta do Mistral: $($outputText.Substring(0, [Math]::Min(300, $outputText.Length)))" "DEBUG"
+            Log "========== RESPOSTA COMPLETA DO MISTRAL ==========" "IA"
+            Log $outputText "IA"
+            Log "========== FIM RESPOSTA ==========" "IA"
 
             $jsonMatch = $outputText -match '\{[\s\S]*?"acao"[\s\S]*?\}'
             if ($jsonMatch) {
