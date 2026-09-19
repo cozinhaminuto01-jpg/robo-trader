@@ -442,6 +442,16 @@ function Abre-OuAdiciona-Posicao {
     $stopLoss = Interpreta-Percentagem -valor $stopLoss -precoReferencia $precoAtual
     $alvo = Interpreta-Percentagem -valor $alvo -precoReferencia $precoAtual
 
+    # "Stop loss" so pode significar protecao contra descida, e "alvo" so pode significar
+    # objetivo de subida - isto e o significado universal destas duas palavras, nao uma
+    # regra de formato. Independentemente do sinal com que ela escreveu o numero (ela usa
+    # varias convencoes: percentagem, preco absoluto, ou o valor em USD da posicao),
+    # forca sempre o stopLoss a ser negativo e o alvo a ser positivo. Sem isto, um
+    # stopLoss positivo (ex: ela pensando no valor em USD, nao numa percentagem) fazia
+    # a posicao fechar-se em qualquer movimento normal do mercado, na direcao errada.
+    if ($null -ne $stopLoss) { $stopLoss = -[Math]::Abs($stopLoss) }
+    if ($null -ne $alvo) { $alvo = [Math]::Abs($alvo) }
+
     $quantidadeNova = $montante / $precoAtual
     $existente = $posicoes | Where-Object { $_.par -eq $par } | Select-Object -First 1
 
@@ -546,6 +556,19 @@ function Calcula-Patrimonio {
         $valorPosicoes += $p.quantidade * $precoAtual
     }
     return $saldo + $valorPosicoes
+}
+
+# Ela as vezes nomeia so o simbolo (ex: "BTC") em vez do par completo do mercado
+# (BTC/USDT), ja que nunca lhe foi ensinado esse formato. Resolve para o par
+# conhecido correspondente, para o par escrito por ela nao deixar de bater certo
+# com os precos de mercado ou com uma posicao que ela ja tenha aberta.
+function Resolve-Par {
+    param([string]$par, [hashtable]$precosAtuais)
+
+    if (-not $par) { return $null }
+    if ($precosAtuais.ContainsKey($par)) { return $par }
+
+    return $precosAtuais.Keys | Where-Object { $_ -like "$par/*" } | Select-Object -First 1
 }
 
 # ============================================================================
@@ -678,7 +701,8 @@ function Executa-Ciclo {
     if ($tipoAcao -eq "compra" -and -not $deciso.par) {
         Log "AVISO: Quis comprar mas nao especificou um par." "AVISO"
     } elseif ($tipoAcao -eq "compra") {
-        $precoAtualPar = $precosAtuais[$deciso.par]
+        $parResolvido = Resolve-Par -par $deciso.par -precosAtuais $precosAtuais
+        $precoAtualPar = if ($parResolvido) { $precosAtuais[$parResolvido] } else { $null }
         if (-not $precoAtualPar) {
             Log "AVISO: Par '$($deciso.par)' desconhecido no mercado. Sem trade." "AVISO"
         } else {
@@ -690,19 +714,20 @@ function Executa-Ciclo {
                 $montante = $estado.saldo
             }
             if ($montante -gt 0) {
-                $estado.posicoes = Abre-OuAdiciona-Posicao -posicoes $estado.posicoes -par $deciso.par -montante $montante -precoAtual $precoAtualPar -stopLoss $deciso.stopLoss -alvo $deciso.alvo
+                $estado.posicoes = Abre-OuAdiciona-Posicao -posicoes $estado.posicoes -par $parResolvido -montante $montante -precoAtual $precoAtualPar -stopLoss $deciso.stopLoss -alvo $deciso.alvo
                 $estado.saldo -= $montante
-                Log "POSICAO: Investidos $montante EUR em $($deciso.par) a `$$precoAtualPar" "TRADE"
+                Log "POSICAO: Investidos $montante EUR em $parResolvido a `$$precoAtualPar" "TRADE"
             }
         }
     } elseif ($tipoAcao -eq "venda" -and -not $deciso.par) {
         Log "AVISO: Quis vender mas nao especificou um par." "AVISO"
     } elseif ($tipoAcao -eq "venda") {
-        $precoAtualPar = $precosAtuais[$deciso.par]
+        $parResolvido = Resolve-Par -par $deciso.par -precosAtuais $precosAtuais
+        $precoAtualPar = if ($parResolvido) { $precosAtuais[$parResolvido] } else { $null }
         if (-not $precoAtualPar) {
             Log "AVISO: Par '$($deciso.par)' desconhecido no mercado. Sem trade." "AVISO"
         } else {
-            $fecho = Fecha-Posicao -posicoes $estado.posicoes -par $deciso.par -precoAtual $precoAtualPar
+            $fecho = Fecha-Posicao -posicoes $estado.posicoes -par $parResolvido -precoAtual $precoAtualPar
             if ($fecho.resultado) {
                 $estado.posicoes = $fecho.posicoes
                 $estado.saldo += $fecho.resultado.valorAtual
