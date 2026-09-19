@@ -61,7 +61,18 @@ function Save-Estado {
 
 function Load-Estado {
     if (Test-Path ".\estado-$AgenteID.json") {
-        return Get-Content ".\estado-$AgenteID.json" -Encoding UTF8 | ConvertFrom-Json
+        $obj = Get-Content ".\estado-$AgenteID.json" -Encoding UTF8 | ConvertFrom-Json
+        # FIX: Ensure numeric fields are actually decimals/ints, not PSObjects
+        return @{
+            id = if ($obj.id) { [string]$obj.id } else { $AgenteID }
+            saldo = if ($obj.saldo) { [decimal]$obj.saldo } else { [decimal]$SaldoInicial }
+            saldoInicial = if ($obj.saldoInicial) { [decimal]$obj.saldoInicial } else { [decimal]$SaldoInicial }
+            posicoes = if ($obj.posicoes) { $obj.posicoes } else { @() }
+            historico = if ($obj.historico) { $obj.historico } else { @() }
+            trades = if ($obj.trades) { $obj.trades } else { @() }
+            winRate = if ($obj.winRate) { [decimal]$obj.winRate } else { 0 }
+            ultimaTradaEm = if ($obj.ultimaTradaEm) { $obj.ultimaTradaEm } else { $null }
+        }
     }
     return $null
 }
@@ -230,7 +241,17 @@ CRITICO:
                     $jsonText = $jsonText -replace '\s+}', '}'
                     $jsonText = $jsonText -replace '\s+\]', ']'
 
-                    # Step 9: Final trim
+                    # Step 9: Remove remaining control/truncation characters (like [alv, [confia)
+                    # These are line truncation artifacts: [2D[K, [7D[K, etc that slip through
+                    $jsonText = [System.Text.RegularExpressions.Regex]::Replace($jsonText, '\[\w+', '')
+
+                    # Step 10: Fix quoted numbers and null values (Mistral sometimes wraps them in quotes)
+                    # "5.0" -> 5.0, "20" -> 20, "null" -> null
+                    $jsonText = $jsonText -replace '": "(\d+\.?\d*)"', ': $1'  # Remove quotes from numbers after colon
+                    $jsonText = $jsonText -replace '": "null"', ': null'       # Fix "null" to null
+                    $jsonText = $jsonText -replace '": "([a-z]+)"', ': "$1"'   # Keep quotes for strings but clean them up
+
+                    # Step 11: Final trim
                     $jsonText = $jsonText.Trim()
 
                     Log "JSON extraido (limpo): $jsonText" "DEBUG"
