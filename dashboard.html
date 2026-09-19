@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🤖 Dashboard Trading Autónomo</title>
+    <title>🤖 IA Trader - Dashboard Tempo Real</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
     <style>
         * {
@@ -12,36 +12,25 @@
             box-sizing: border-box;
         }
 
-        :root {
-            --primary: #667eea;
-            --secondary: #764ba2;
-            --success: #10b981;
-            --danger: #ef4444;
-            --warning: #f59e0b;
-            --dark: #1f2937;
-            --light: #f9fafb;
-            --border: #e5e7eb;
-        }
-
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
-            color: var(--dark);
+            font-family: 'Courier New', monospace;
+            background: #0f1419;
+            color: #e0e0e0;
             padding: 20px;
             min-height: 100vh;
         }
 
         .container {
-            max-width: 1400px;
+            max-width: 1600px;
             margin: 0 auto;
         }
 
         header {
-            background: white;
-            border-radius: 12px;
-            padding: 30px;
-            margin-bottom: 30px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 8px;
+            padding: 25px;
+            margin-bottom: 20px;
+            color: white;
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -49,546 +38,503 @@
 
         h1 {
             font-size: 28px;
-            background: linear-gradient(135deg, var(--primary), var(--secondary));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            font-weight: bold;
+        }
+
+        .status-bar {
             display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .status-badge {
-            display: inline-block;
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: 600;
-            text-transform: uppercase;
-        }
-
-        .status-ativo {
-            background: rgba(16, 185, 129, 0.1);
-            color: var(--success);
-        }
-
-        .status-repouso {
-            background: rgba(245, 158, 11, 0.1);
-            color: var(--warning);
-        }
-
-        .status-erro {
-            background: rgba(239, 68, 68, 0.1);
-            color: var(--danger);
-        }
-
-        .grid-2 {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
             gap: 20px;
-            margin-bottom: 30px;
-        }
-
-        .grid-3 {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-
-        .card {
-            background: white;
-            border-radius: 12px;
-            padding: 20px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-        }
-
-        .card-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
-            padding-bottom: 15px;
-            border-bottom: 1px solid var(--border);
-        }
-
-        .card-title {
             font-size: 14px;
-            font-weight: 600;
-            color: #666;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
         }
 
-        .card-value {
-            font-size: 32px;
-            font-weight: 700;
-            color: var(--primary);
-            margin-top: 10px;
+        .status-item {
+            background: rgba(255,255,255,0.1);
+            padding: 10px 15px;
+            border-radius: 4px;
+            border-left: 3px solid #10b981;
         }
 
-        .card-subtext {
+        .status-item.danger {
+            border-left-color: #ef4444;
+        }
+
+        .status-item label {
+            opacity: 0.8;
+            display: block;
             font-size: 12px;
-            color: #999;
-            margin-top: 8px;
         }
 
-        .card-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 10px 0;
-            border-bottom: 1px solid var(--border);
+        .status-item value {
+            font-size: 18px;
+            font-weight: bold;
+            display: block;
         }
 
-        .card-row:last-child {
-            border-bottom: none;
-        }
-
-        .card-label {
-            font-size: 13px;
-            color: #666;
-        }
-
-        .card-data {
-            font-size: 14px;
-            font-weight: 600;
-            color: var(--dark);
-        }
-
-        .badge-success {
-            background: rgba(16, 185, 129, 0.1);
-            color: var(--success);
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 11px;
-            font-weight: 600;
-        }
-
-        .badge-danger {
-            background: rgba(239, 68, 68, 0.1);
-            color: var(--danger);
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 11px;
-            font-weight: 600;
-        }
-
-        .progress-bar {
-            width: 100%;
-            height: 8px;
-            background: var(--border);
-            border-radius: 4px;
-            overflow: hidden;
-            margin-top: 10px;
-        }
-
-        .progress-fill {
-            height: 100%;
-            background: linear-gradient(90deg, var(--primary), var(--secondary));
-            border-radius: 4px;
-            transition: width 0.3s ease;
-        }
-
-        .agentes-list {
+        .main-grid {
             display: grid;
-            gap: 10px;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
         }
 
-        .agente-item {
-            background: var(--light);
-            padding: 12px;
+        .panel {
+            background: #1a1f26;
+            border: 1px solid #2a2f36;
             border-radius: 8px;
-            border-left: 4px solid var(--primary);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+            padding: 20px;
+            overflow: hidden;
         }
 
-        .agente-info {
-            flex: 1;
+        .panel h2 {
+            font-size: 16px;
+            margin-bottom: 15px;
+            color: #667eea;
+            border-bottom: 1px solid #2a2f36;
+            padding-bottom: 10px;
         }
 
-        .agente-nome {
-            font-weight: 600;
-            color: var(--dark);
-            font-size: 13px;
+        .conversation {
+            max-height: 400px;
+            overflow-y: auto;
+            font-size: 12px;
+            line-height: 1.5;
         }
 
-        .agente-saldo {
-            font-size: 14px;
-            font-weight: 600;
-            color: var(--primary);
-            margin-top: 4px;
+        .conversation-msg {
+            margin-bottom: 15px;
+            padding: 10px;
+            background: #252b33;
+            border-radius: 4px;
+            border-left: 3px solid #667eea;
         }
 
-        .agente-roi {
+        .conversation-msg.ia {
+            border-left-color: #10b981;
+            background: #1a2a1a;
+        }
+
+        .conversation-msg.decision {
+            border-left-color: #f59e0b;
+            background: #2a2015;
+        }
+
+        .conversation-msg.result {
+            border-left-color: #ef4444;
+            background: #2a1515;
+        }
+
+        .label {
+            font-weight: bold;
+            color: #667eea;
             font-size: 11px;
-            color: #999;
-            margin-top: 2px;
+            text-transform: uppercase;
+            display: block;
+            margin-bottom: 5px;
         }
 
-        .trades-log {
+        .conversation-msg.ia .label {
+            color: #10b981;
+        }
+
+        .conversation-msg.decision .label {
+            color: #f59e0b;
+        }
+
+        .conversation-msg.result .label {
+            color: #ef4444;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-box {
+            background: #1a1f26;
+            border: 1px solid #2a2f36;
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+        }
+
+        .stat-box .label {
+            color: #999;
+            margin-bottom: 8px;
+        }
+
+        .stat-box .value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-box.positive .value {
+            color: #10b981;
+        }
+
+        .stat-box.negative .value {
+            color: #ef4444;
+        }
+
+        .chart-container {
+            background: #1a1f26;
+            border: 1px solid #2a2f36;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            height: 300px;
+            position: relative;
+        }
+
+        .trades-list {
             max-height: 300px;
             overflow-y: auto;
         }
 
         .trade-item {
+            background: #252b33;
             padding: 10px;
-            border-bottom: 1px solid var(--border);
+            margin-bottom: 8px;
+            border-radius: 4px;
+            border-left: 3px solid #667eea;
             font-size: 12px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
         }
 
-        .trade-item:last-child {
-            border-bottom: none;
+        .trade-item.win {
+            border-left-color: #10b981;
         }
 
-        .trade-time {
+        .trade-item.loss {
+            border-left-color: #ef4444;
+        }
+
+        .trade-item.neutral {
+            border-left-color: #999;
+        }
+
+        .refresh-indicator {
+            font-size: 12px;
             color: #999;
-            min-width: 60px;
-        }
-
-        .trade-info {
-            flex: 1;
-            margin: 0 10px;
-        }
-
-        .trade-action {
-            font-weight: 600;
-        }
-
-        .trade-gain {
-            font-weight: 600;
-            min-width: 60px;
+            margin-top: 10px;
             text-align: right;
         }
 
-        .trade-gain.positive {
-            color: var(--success);
+        .blinking {
+            animation: blink 1s infinite;
         }
 
-        .trade-gain.negative {
-            color: var(--danger);
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0.5; }
         }
 
-        .chart-container {
-            position: relative;
-            height: 300px;
-            margin-top: 15px;
+        ::-webkit-scrollbar {
+            width: 6px;
         }
 
-        .empty-state {
-            text-align: center;
-            padding: 30px;
-            color: #999;
+        ::-webkit-scrollbar-track {
+            background: #1a1f26;
         }
 
-        .empty-state-icon {
-            font-size: 48px;
-            margin-bottom: 10px;
+        ::-webkit-scrollbar-thumb {
+            background: #667eea;
+            border-radius: 3px;
         }
 
-        .refresh-info {
-            font-size: 11px;
-            color: #999;
-            text-align: center;
-            margin-top: 20px;
-        }
-
-        .percentage {
-            font-weight: 600;
-            font-size: 13px;
-        }
-
-        .percentage.positive {
-            color: var(--success);
-        }
-
-        .percentage.negative {
-            color: var(--danger);
-        }
-
-        @media (max-width: 768px) {
-            header {
-                flex-direction: column;
-                gap: 15px;
-                text-align: center;
-            }
-
-            h1 {
-                flex-direction: column;
-            }
-
-            .grid-2, .grid-3 {
+        @media (max-width: 1024px) {
+            .main-grid {
                 grid-template-columns: 1fr;
             }
-        }
-
-        .loading {
-            text-align: center;
-            padding: 20px;
-            color: #999;
-        }
-
-        .spinner {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid rgba(102, 126, 234, 0.1);
-            border-radius: 50%;
-            border-top-color: var(--primary);
-            animation: spin 0.6s linear infinite;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
         }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>🤖 Dashboard Trading Autónomo</h1>
-            <span class="status-badge status-ativo" id="statusBadge">
-                🟢 ATIVO
-            </span>
+            <h1>🤖 IA Trader Autónoma</h1>
+            <div class="status-bar">
+                <div class="status-item">
+                    <label>Saldo Actual</label>
+                    <value id="currentBalance">20.00 EUR</value>
+                </div>
+                <div class="status-item">
+                    <label>Meta</label>
+                    <value id="target">100.00 EUR</value>
+                </div>
+                <div class="status-item">
+                    <label>Progresso</label>
+                    <value id="progress">0%</value>
+                </div>
+                <div class="status-item" id="statusIndicator">
+                    <label>Status</label>
+                    <value id="status">Iniciando...</value>
+                </div>
+            </div>
         </header>
 
-        <!-- Métricas Principais -->
-        <div class="grid-2">
-            <div class="card">
-                <div class="card-header">
-                    <span class="card-title">💰 Capital Total</span>
-                </div>
-                <div class="card-value" id="capitalTotal">20.00 EUR</div>
-                <div class="card-subtext" id="capitalChange">+0% desde início</div>
-                <div class="progress-bar" style="margin-top: 15px;">
-                    <div class="progress-fill" id="metaProgress" style="width: 20%"></div>
-                </div>
-                <div class="card-subtext" style="margin-top: 8px;" id="metaText">
-                    Meta: 100 EUR (20% atingido)
-                </div>
+        <div class="stats-grid">
+            <div class="stat-box">
+                <div class="label">Total Trades</div>
+                <div class="value" id="totalTrades">0</div>
             </div>
-
-            <div class="card">
-                <div class="card-header">
-                    <span class="card-title">📊 Performance</span>
-                </div>
-                <div class="card-row">
-                    <span class="card-label">Trades Totais</span>
-                    <span class="card-data" id="totalTrades">0</span>
-                </div>
-                <div class="card-row">
-                    <span class="card-label">Taxa de Sucesso</span>
-                    <span class="card-data" id="winRate">0%</span>
-                </div>
-                <div class="card-row">
-                    <span class="card-label">Melhor Trade</span>
-                    <span class="card-data badge-success" id="bestTrade">+0%</span>
-                </div>
-                <div class="card-row">
-                    <span class="card-label">Pior Trade</span>
-                    <span class="card-data badge-danger" id="worstTrade">-0%</span>
-                </div>
+            <div class="stat-box">
+                <div class="label">Win Rate</div>
+                <div class="value" id="winRate">0%</div>
             </div>
-
-            <div class="card">
-                <div class="card-header">
-                    <span class="card-title">🤖 Sistema</span>
-                </div>
-                <div class="card-row">
-                    <span class="card-label">Agentes Ativos</span>
-                    <span class="card-data" id="agentesAtivos">1</span>
-                </div>
-                <div class="card-row">
-                    <span class="card-label">Ciclo Atual</span>
-                    <span class="card-data" id="cicloAtual">0</span>
-                </div>
-                <div class="card-row">
-                    <span class="card-label">Estado</span>
-                    <span class="card-data" id="estadoSistema">Iniciando...</span>
-                </div>
-                <div class="card-row">
-                    <span class="card-label">Última Atualização</span>
-                    <span class="card-data" id="ultimaAtualizacao">--:--:--</span>
-                </div>
+            <div class="stat-box" id="gainBox" class="positive">
+                <div class="label">Ganho Total</div>
+                <div class="value" id="totalGain">+0.00 EUR</div>
             </div>
         </div>
 
-        <!-- Agentes e Trades -->
-        <div class="grid-2">
-            <div class="card">
-                <div class="card-header">
-                    <span class="card-title">🤖 Agentes Ativos</span>
-                </div>
-                <div class="agentes-list" id="agentesLista">
-                    <div class="empty-state">
-                        <div class="empty-state-icon">⏳</div>
-                        <p>Aguardando dados...</p>
+        <div class="chart-container">
+            <canvas id="evolutionChart"></canvas>
+        </div>
+
+        <div class="main-grid">
+            <div class="panel">
+                <h2>💭 Raciocínio da IA (Último Ciclo)</h2>
+                <div class="conversation" id="reasoning">
+                    <div class="conversation-msg ia">
+                        <span class="label">À espera de dados...</span>
+                        <div>Inicializando sistema...</div>
                     </div>
                 </div>
             </div>
 
-            <div class="card">
-                <div class="card-header">
-                    <span class="card-title">📈 Últimos Trades</span>
-                </div>
-                <div class="trades-log" id="tradesLista">
-                    <div class="empty-state">
-                        <div class="empty-state-icon">📭</div>
-                        <p>Sem trades ainda</p>
+            <div class="panel">
+                <h2>📊 Decisão & Resultado</h2>
+                <div class="conversation" id="decisions">
+                    <div class="conversation-msg decision">
+                        <span class="label">À espera...</span>
+                        <div>Aguardando primeiro ciclo...</div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- Gráfico -->
-        <div class="card">
-            <div class="card-header">
-                <span class="card-title">📊 Evolução do Capital</span>
+        <div class="main-grid">
+            <div class="panel">
+                <h2>📈 Histórico de Trades (Últimos 10)</h2>
+                <div class="trades-list" id="tradesList">
+                    <div style="color: #999; font-size: 12px;">Sem trades ainda...</div>
+                </div>
             </div>
-            <div class="chart-container">
-                <canvas id="chartCapital"></canvas>
+
+            <div class="panel">
+                <h2>🔄 Ciclos Executados</h2>
+                <div class="conversation" id="cycles">
+                    <div class="conversation-msg">
+                        <span class="label">Aguardando...</span>
+                        <div>Sistema a inicializar...</div>
+                    </div>
+                </div>
             </div>
         </div>
 
-        <div class="refresh-info" id="refreshInfo">
-            🔄 Atualização automática a cada 2 segundos
+        <div class="refresh-indicator">
+            Auto-refresh: <span class="blinking">●</span> Activo | Última atualização: <span id="lastUpdate">--:--:--</span>
         </div>
     </div>
 
     <script>
-        let chartCapital = null;
-        const historico = [];
+        const MAX_HISTORY = 50;
+        let balanceHistory = [20];
+        let tradeHistory = [];
+        let chart = null;
 
-        async function atualizaDashboard() {
+        async function loadAgentState() {
             try {
-                // Tenta ler ficheiros JSON (em produção, seriam gerados pelo robô)
-                // Por enquanto, simula dados
-
-                const agora = new Date();
-                const timestamp = agora.toLocaleTimeString('pt-PT');
-                document.getElementById('ultimaAtualizacao').textContent = timestamp;
-
-                // Dados simulados (enquanto não há ficheiros JSON reais)
-                const fundoGlobal = {
-                    capitalTotal: 20 + Math.random() * 80,
-                    agentes: [
-                        {
-                            id: 'Agente_1',
-                            saldo: 20 + Math.random() * 50,
-                            saldoInicial: 20,
-                            winRate: Math.floor(Math.random() * 100)
-                        }
-                    ],
-                    metaAtual: 100,
-                    cicloAtual: Math.floor(Math.random() * 1000)
-                };
-
-                // Atualiza métrica principal
-                const capital = fundoGlobal.capitalTotal.toFixed(2);
-                document.getElementById('capitalTotal').textContent = capital + ' EUR';
-
-                const roi = (((fundoGlobal.capitalTotal - 20) / 20) * 100).toFixed(1);
-                document.getElementById('capitalChange').textContent =
-                    (roi >= 0 ? '+' : '') + roi + '% desde início';
-
-                // Atualiza meta
-                const progresso = (fundoGlobal.capitalTotal / fundoGlobal.metaAtual * 100).toFixed(1);
-                document.getElementById('metaProgress').style.width = Math.min(progresso, 100) + '%';
-                document.getElementById('metaText').textContent =
-                    `Meta: ${fundoGlobal.metaAtual} EUR (${progresso}% atingido)`;
-
-                // Atualiza agentes
-                document.getElementById('agentesAtivos').textContent = fundoGlobal.agentes.length;
-                document.getElementById('cicloAtual').textContent = fundoGlobal.cicloAtual;
-
-                const agentesHTML = fundoGlobal.agentes.map(a => `
-                    <div class="agente-item">
-                        <div class="agente-info">
-                            <div class="agente-nome">${a.id}</div>
-                            <div class="agente-saldo">${a.saldo.toFixed(2)} EUR</div>
-                            <div class="agente-roi">ROI: ${(((a.saldo - a.saldoInicial) / a.saldoInicial * 100).toFixed(1))}% | Win Rate: ${a.winRate}%</div>
-                        </div>
-                    </div>
-                `).join('');
-                document.getElementById('agentesLista').innerHTML = agentesHTML || '<div class="empty-state"><p>Sem agentes</p></div>';
-
-                // Atualiza gráfico
-                if (historico.length > 0 && historico[historico.length - 1].valor !== fundoGlobal.capitalTotal) {
-                    historico.push({
-                        timestamp: agora,
-                        valor: fundoGlobal.capitalTotal
-                    });
-                } else if (historico.length === 0) {
-                    historico.push({
-                        timestamp: agora,
-                        valor: 20
-                    });
-                    historico.push({
-                        timestamp: agora,
-                        valor: fundoGlobal.capitalTotal
-                    });
-                }
-
-                atualizaGrafico();
-
-            } catch (erro) {
-                console.log('Aguardando dados do sistema...', erro);
+                const response = await fetch('./estado-Agente_1.json');
+                if (!response.ok) return null;
+                return await response.json();
+            } catch {
+                return null;
             }
         }
 
-        function atualizaGrafico() {
-            const ctx = document.getElementById('chartCapital');
-            const labels = historico.map(h => h.timestamp.toLocaleTimeString('pt-PT'));
-            const dados = historico.map(h => h.valor);
+        async function loadLatestLog() {
+            try {
+                // Simula leitura de logs - em produção seria via WebSocket ou polling
+                const state = await loadAgentState();
+                if (!state) return null;
+                return state;
+            } catch {
+                return null;
+            }
+        }
 
-            if (!chartCapital) {
-                chartCapital = new Chart(ctx, {
+        async function updateDashboard() {
+            const state = await loadAgentState();
+            if (!state) return;
+
+            updateHeader(state);
+            updateStats(state);
+            updateChart(state);
+            updateDecisions(state);
+            updateTrades(state);
+            document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString('pt-PT');
+        }
+
+        function updateHeader(state) {
+            const balance = state.saldo || 20;
+            const target = 100;
+            const progress = Math.round((balance / target) * 100);
+
+            document.getElementById('currentBalance').textContent = `${balance.toFixed(2)} EUR`;
+            document.getElementById('progress').textContent = `${progress}%`;
+
+            const statusEl = document.getElementById('statusIndicator');
+            if (balance < 20) {
+                document.getElementById('status').textContent = 'GAME OVER';
+                statusEl.className = 'status-item danger';
+            } else if (balance >= 100) {
+                document.getElementById('status').textContent = 'META ATINGIDA!';
+                statusEl.className = 'status-item';
+            } else if (balance < 22) {
+                document.getElementById('status').textContent = 'CRÍTICO';
+                statusEl.className = 'status-item danger';
+            } else {
+                document.getElementById('status').textContent = 'OPERACIONAL';
+                statusEl.className = 'status-item';
+            }
+        }
+
+        function updateStats(state) {
+            const trades = state.trades || [];
+            const wins = trades.filter(t => t.ganho > 0).length;
+            const winRate = trades.length > 0 ? Math.round((wins / trades.length) * 100) : 0;
+            const totalGain = trades.reduce((sum, t) => sum + (t.ganho || 0), 0);
+
+            document.getElementById('totalTrades').textContent = trades.length;
+            document.getElementById('winRate').textContent = `${winRate}%`;
+
+            const gainBox = document.getElementById('gainBox');
+            if (totalGain > 0) {
+                gainBox.className = 'stat-box positive';
+                document.getElementById('totalGain').textContent = `+${totalGain.toFixed(2)} EUR`;
+            } else if (totalGain < 0) {
+                gainBox.className = 'stat-box negative';
+                document.getElementById('totalGain').textContent = `${totalGain.toFixed(2)} EUR`;
+            }
+        }
+
+        function updateChart(state) {
+            const trades = state.trades || [];
+            const labels = trades.map((_, i) => `Trade ${i + 1}`);
+            let cumulativeSaldo = 20;
+            const balances = [20];
+
+            trades.forEach(trade => {
+                cumulativeSaldo += trade.ganho || 0;
+                balances.push(Math.max(cumulativeSaldo, 0));
+            });
+
+            const ctx = document.getElementById('evolutionChart').getContext('2d');
+
+            if (chart) {
+                chart.data.labels = labels;
+                chart.data.datasets[0].data = balances;
+                chart.update();
+            } else {
+                chart = new Chart(ctx, {
                     type: 'line',
                     data: {
                         labels: labels,
                         datasets: [{
-                            label: 'Capital (EUR)',
-                            data: dados,
+                            label: 'Evolução do Saldo (EUR)',
+                            data: balances,
                             borderColor: '#667eea',
                             backgroundColor: 'rgba(102, 126, 234, 0.1)',
                             borderWidth: 2,
                             fill: true,
                             tension: 0.4,
-                            pointRadius: 4,
                             pointBackgroundColor: '#667eea',
                             pointBorderColor: '#fff',
-                            pointBorderWidth: 2
+                            pointRadius: 4,
+                            pointHoverRadius: 6
                         }]
                     },
                     options: {
                         responsive: true,
                         maintainAspectRatio: false,
                         plugins: {
-                            legend: { display: false }
+                            legend: {
+                                display: true,
+                                labels: { color: '#e0e0e0' }
+                            }
                         },
                         scales: {
                             y: {
                                 beginAtZero: true,
-                                min: 15,
-                                ticks: { callback: v => v.toFixed(0) + ' EUR' }
+                                grid: { color: '#2a2f36' },
+                                ticks: { color: '#999' }
+                            },
+                            x: {
+                                grid: { color: '#2a2f36' },
+                                ticks: { color: '#999' }
                             }
                         }
                     }
                 });
-            } else {
-                chartCapital.data.labels = labels;
-                chartCapital.data.datasets[0].data = dados;
-                chartCapital.update();
             }
         }
 
-        // Atualiza a cada 2 segundos
-        atualizaDashboard();
-        setInterval(atualizaDashboard, 2000);
+        function updateDecisions(state) {
+            const trades = state.trades || [];
+            const lastTrade = trades[trades.length - 1];
+
+            let html = '';
+
+            if (lastTrade) {
+                html += `
+                    <div class="conversation-msg decision">
+                        <span class="label">📊 Última Decisão</span>
+                        <div><strong>Par:</strong> ${lastTrade.par || 'N/A'}</div>
+                        <div><strong>Ação:</strong> ${lastTrade.acao || 'hold'}</div>
+                        <div><strong>Montante:</strong> ${lastTrade.montante} EUR</div>
+                        <div><strong>Estratégia:</strong> ${lastTrade.estrategia || 'N/A'}</div>
+                    </div>
+                    <div class="conversation-msg result">
+                        <span class="label">📈 Resultado</span>
+                        <div><strong>Resultado:</strong> ${lastTrade.resultado}%</div>
+                        <div><strong>Ganho/Perda:</strong> ${lastTrade.ganho > 0 ? '+' : ''}${lastTrade.ganho.toFixed(2)} EUR</div>
+                        <div><strong>Timestamp:</strong> ${new Date(lastTrade.timestamp).toLocaleTimeString('pt-PT')}</div>
+                    </div>
+                `;
+            }
+
+            document.getElementById('decisions').innerHTML = html || '<div style="color: #999;">À espera do primeiro trade...</div>';
+        }
+
+        function updateTrades(state) {
+            const trades = state.trades || [];
+            let html = '';
+
+            trades.slice(-10).reverse().forEach((trade, idx) => {
+                const isWin = trade.ganho > 0;
+                const className = isWin ? 'win' : (trade.ganho < 0 ? 'loss' : 'neutral');
+                const sign = trade.ganho > 0 ? '+' : '';
+
+                html += `
+                    <div class="trade-item ${className}">
+                        <strong>${trade.acao.toUpperCase()}</strong> ${trade.montante} EUR em ${trade.par}
+                        <br/>Resultado: ${trade.resultado}% | Ganho: ${sign}${trade.ganho.toFixed(2)} EUR
+                    </div>
+                `;
+            });
+
+            document.getElementById('tradesList').innerHTML = html || '<div style="color: #999;">Sem trades ainda...</div>';
+        }
+
+        // Auto-refresh a cada 2 segundos
+        setInterval(updateDashboard, 2000);
+        updateDashboard();
     </script>
 </body>
 </html>
