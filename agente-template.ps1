@@ -205,6 +205,7 @@ function Chama-IA {
     $prompt = @"
 Tens uma conta na Binance. Dinheiro disponivel (cash): $($contexto.saldo) USD.
 O teu objetivo: fazer o teu patrimonio total crescer ate aos 100 USD. Quando lá chegares, ganhas um descanso.
+Se o teu patrimonio total chegar a 0, e o fim - perdes tudo e nao ha volta atras.
 $agentesInfo
 
 As tuas posicoes abertas neste momento:
