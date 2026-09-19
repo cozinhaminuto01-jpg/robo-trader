@@ -44,7 +44,12 @@ function Log {
 }
 
 function Save-Estado {
-    $estado | ConvertTo-Json | Set-Content ".\estado-$AgenteID.json"
+    try {
+        $json = $estado | ConvertTo-Json
+        $json | Set-Content ".\estado-$AgenteID.json" -Force
+    } catch {
+        Log "AVISO: Erro ao guardar estado: $_" "AVISO"
+    }
 }
 
 function Load-Estado {
@@ -351,14 +356,19 @@ function Simula-Trade {
 function Executa-Ciclo {
     param([int]$ciclo)
 
-    Log "===== Ciclo $ciclo Iniciado =====" "CICLO"
+    try {
+        Log "===== Ciclo $ciclo Iniciado =====" "CICLO"
 
-    if ($estado.saldo -lt 20) {
-        Log "GAME OVER! Saldo caiu abaixo de 20 EUR!" "ERRO"
-        Log "Saldo final: $($estado.saldo) EUR (inicial: $($estado.saldoInicial) EUR)" "RESULTADO"
-        Log "Trades executados: $($estado.trades.Count) | Win Rate: $($estado.winRate)%" "RESULTADO"
-        Save-Estado
-        exit 1
+        if ($estado.saldo -lt 20) {
+            Log "GAME OVER! Saldo caiu abaixo de 20 EUR!" "ERRO"
+            Log "Saldo final: $($estado.saldo) EUR (inicial: $($estado.saldoInicial) EUR)" "RESULTADO"
+            Log "Trades executados: $($estado.trades.Count) | Win Rate: $($estado.winRate)%" "RESULTADO"
+            Save-Estado
+            exit 1
+        }
+    } catch {
+        Log "Erro no inicio do ciclo: $_" "ERRO"
+        throw
     }
 
     if ($estado.saldo -ge 100) {
@@ -446,8 +456,15 @@ if ($estadoAnterior) {
 
 $ciclo = 1
 while ($true) {
-    Executa-Ciclo -ciclo $ciclo
-    $ciclo++
-
-    Start-Sleep -Seconds $config.ciclo_segundos
+    try {
+        Executa-Ciclo -ciclo $ciclo
+        $ciclo++
+        Start-Sleep -Seconds $config.ciclo_segundos
+    } catch {
+        Log "ERRO NAO APANHADO: $_" "ERRO"
+        Log "Stack: $($_.ScriptStackTrace)" "ERRO"
+        Log "Continuando apos erro..." "AVISO"
+        $ciclo++
+        Start-Sleep -Seconds 5
+    }
 }
