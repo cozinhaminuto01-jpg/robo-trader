@@ -90,61 +90,63 @@ function Chama-IA {
     param([hashtable]$contexto)
 
     $prompt = @"
-=== SITUACAO REAL: VIDA OU MORTE ===
-Tu es uma IA trader. Tens 20 EUR. E SÓ ISSO.
+=== PROPRIETARIO DA EMPRESA - AUTONOMIA TOTAL ===
+Tu es o DONO desta empresa de trading. Saldo actual: $($contexto.saldo) EUR
 
 OBJECTIVOS CLAROS:
 - Se saldo cair abaixo de 20 EUR: MORRES (game over)
 - Se saldo atingir 100 EUR: descansas 24h depois reinicia
-- Tens acesso à Binance, a cada 1 minuto podes revisar e decidir
+- PODES CRIAR NOVOS AGENTES QUANDO QUISERES para acelerar o crescimento
+- Cada novo agente: 20 EUR capital inicial
 
-SALDO ACTUAL: $($contexto.saldo) EUR
-Trades executados: $($contexto.nTrades)
-Taxa de vitória: $($contexto.winRate)%
+ESTADO ACTUAL DA EMPRESA:
+- Saldo do CEO (tu): $($contexto.saldo) EUR
+- Agentes trabalhando: $($contexto.numAgentes)
+- Trades executados: $($contexto.nTrades)
+- Taxa de vitória: $($contexto.winRate)%
+- Capital disponivel para novos agentes: $([Math]::Floor($contexto.saldo / 20)) agentes
 
 MERCADO ACTUAL (pares em movimento):
 $($contexto.mercado | ForEach-Object { "- $($_.par): `$$($_.preco) (mudanca 24h: $($_.mudanca24h)%) volume: $($_.volume)" } | Out-String)
 
-=== NENHUMA RESTRICAO IMPOSTA ===
-Nao tenho regras pre-configuradas. TU DECIDES:
-- Quanto arriscar por trade (tudo, metade, 1%, o que quiseres)
-- Que estrategia usar (agressiva, conservadora, scalping, hold, tudo)
-- Quando entrar e quando sair
-- Stop loss ou nao (se nao tiveres, podes perder tudo num trade)
-- Que pares escolher
+=== PODER TOTAL - NENHUMA RESTRICAO ===
+TU DECIDES TUDO:
+- Quanto arriscar por trade
+- Que estrategia usar
+- Quando criar novos agentes (nao precisa pedir permissao a ninguem)
+- Como alocar capital entre agentes
+- Quanto expandir a operacao
 
-=== PENSA ASSIM ===
-Tens uma meta: chegar aos 100 EUR sem quebrar os 20.
-
-1. ANALISA: Qual eh a melhor estrategia AGORA para nao morrer?
-   - Mercado esta bom ou mau?
-   - Ha pares com ganho garantido?
-   - Arrisco tudo num trade ou parto em varios?
+=== PENSA COMO CEO ===
+1. ANALISA: Qual eh a melhor estrategia para crescer rapido sem morrer?
+   - Continuo sozinho ou crio novos agentes?
+   - Se mercado esta bom, posso dar risco maior
+   - Se crescer rapido, posso delegar
 
 2. CONVERSA COMIGO: Explica teu raciocinio
    - Por que esta estrategia eh boa?
-   - Qual eh o risco REAL de morrer?
-   - Como te protegees se der tudo errado?
+   - Vale a pena criar novos agentes?
+   - Como me protejo?
 
 3. DECIDE: Que fazes agora?
-   - Compra? Venda? Hold? Outra coisa?
-   - Se compra: quanto? Com stop loss? Alvo?
+   - Compra? Venda? Hold?
+   - Cria novo agente? Quantos?
 
 === RESPOSTA (JSON + RACIOCINIO) ===
-Primeiro CONVERSA COMIGO (explica teu pensamento):
-"Estou a pensar em... porque... o risco eh... se der errado..."
+Primeiro CONVERSA COMIGO (pensa em voz alta):
 
 Depois JSON COM TUA DECISAO FINAL:
 {
   "acao": "compra|venda|hold",
   "par": "BTC/USDT ou null",
-  "montante": quanto arriscar (podes ser criativo: 10 EUR, 5 EUR, 20 EUR, fraccoes, etc),
-  "stopLoss": limite de perda% (podes nao ter se quiseres correr risco total),
+  "montante": valor a arriscar,
+  "stopLoss": limite de perda% ou null,
   "alvo": alvo de ganho%,
-  "estrategia": "descricao da tua ideia",
+  "estrategia": "descricao",
   "risco": "baixo|medio|alto|critico",
   "confianca": 0.0-1.0,
-  "raciocinio": "resumo completo do teu pensamento"
+  "raciocinio": "resumo do pensamento",
+  "criarAgentes": 0 ou numero de novos agentes a criar
 }
 "@
 
@@ -182,10 +184,11 @@ Depois JSON COM TUA DECISAO FINAL:
                         risco = $obj.risco
                         confianca = $obj.confianca
                         raciocinio = $obj.raciocinio
+                        criarAgentes = if ($obj.criarAgentes) { $obj.criarAgentes } else { 0 }
                     }
 
                     if ($deciso.acao -and $deciso.risco) {
-                        Log "IA: Acao=$($deciso.acao), Par=$($deciso.par), Confianca=$($deciso.confianca)" "IA"
+                        Log "IA: Acao=$($deciso.acao), Par=$($deciso.par), Confianca=$($deciso.confianca), CriarAgentes=$($deciso.criarAgentes)" "IA"
                         return $deciso
                     }
                 } catch {
@@ -203,6 +206,7 @@ Depois JSON COM TUA DECISAO FINAL:
             risco = "baixo"
             confianca = 0.3
             estrategia = "Aguardando proxima oportunidade"
+            criarAgentes = 0
         }
 
     } catch {
@@ -213,8 +217,46 @@ Depois JSON COM TUA DECISAO FINAL:
             risco = "baixo"
             confianca = 0
             estrategia = "Erro de comunicacao"
+            criarAgentes = 0
         }
     }
+}
+
+# ============================================================================
+# CRIAR NOVOS AGENTES (CEO DECIDE EXPANDIR)
+# ============================================================================
+
+function Cria-NovoAgente {
+    param([int]$numeroAgente, [decimal]$capital)
+
+    Log "CEO DECISION: Criando novo Agente_$numeroAgente com capital de $capital EUR" "DECISAO"
+
+    $novoAgenteFile = ".\agente-$numeroAgente.ps1"
+    $conteudoScript = Get-Content ".\agente-template.ps1" -Raw
+
+    $conteudoScript | Set-Content $novoAgenteFile
+
+    $job = Start-Job -FilePath $novoAgenteFile -ArgumentList @("Agente_$numeroAgente", $capital, ".\config-testnet.json")
+
+    Log "Agente_$numeroAgente iniciado (PID: $($job.Id))" "INFO"
+
+    if (-not (Test-Path ".\agentes-ativos.json")) {
+        $agentes = @()
+    } else {
+        $agentes = Get-Content ".\agentes-ativos.json" | ConvertFrom-Json
+    }
+
+    $agentes += @{
+        id = "Agente_$numeroAgente"
+        jobId = $job.Id
+        capital = $capital
+        criadoEm = Get-Date
+        status = "ativo"
+    }
+
+    $agentes | ConvertTo-Json | Set-Content ".\agentes-ativos.json"
+
+    return @{ id = "Agente_$numeroAgente"; jobId = $job.Id }
 }
 
 # ============================================================================
@@ -293,17 +335,38 @@ function Executa-Ciclo {
     }
 
     $dadosMercado = Get-MercadoData
-    Log "Analisando $($dadosMercado.Count) pares em movimento..." "INFO"
+
+    $numAgentes = 0
+    if (Test-Path ".\agentes-ativos.json") {
+        $agentes = Get-Content ".\agentes-ativos.json" | ConvertFrom-Json
+        $numAgentes = if ($agentes -is [array]) { $agentes.Count } else { 1 }
+    }
+
+    Log "Analisando $($dadosMercado.Count) pares em movimento ($numAgentes agentes ativos)..." "INFO"
 
     $contexto = @{
         saldo = $estado.saldo
         nTrades = $estado.trades.Count
         winRate = $estado.winRate
         mercado = $dadosMercado
+        numAgentes = $numAgentes
     }
     $deciso = Chama-IA -contexto $contexto
 
     Log "Decisao: $($deciso | ConvertTo-Json -Compress)" "IA"
+
+    $novasAgentes = if ($deciso.criarAgentes) { $deciso.criarAgentes } else { 0 }
+    if ($novasAgentes -gt 0) {
+        Log "CEO CRIANDO $novasAgentes NOVOS AGENTES!" "DECISAO"
+        for ($i = 1; $i -le $novasAgentes; $i++) {
+            $proximoID = $numAgentes + $i
+            if ($estado.saldo -ge 20) {
+                Cria-NovoAgente -numeroAgente $proximoID -capital 20
+                $estado.saldo -= 20
+                Log "Novo agente criado. Saldo restante: $($estado.saldo) EUR" "INFO"
+            }
+        }
+    }
 
     $trade = Simula-Trade -deciso $deciso
     if ($trade) {
