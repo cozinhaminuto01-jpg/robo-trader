@@ -67,9 +67,9 @@ function Load-Estado {
             id = if ($obj.id) { [string]$obj.id } else { $AgenteID }
             saldo = if ($obj.saldo) { [decimal]$obj.saldo } else { [decimal]$SaldoInicial }
             saldoInicial = if ($obj.saldoInicial) { [decimal]$obj.saldoInicial } else { [decimal]$SaldoInicial }
-            posicoes = if ($obj.posicoes) { $obj.posicoes } else { @() }
-            historico = if ($obj.historico) { $obj.historico } else { @() }
-            trades = if ($obj.trades) { $obj.trades } else { @() }
+            posicoes = if ($obj.posicoes) { @($obj.posicoes) } else { @() }
+            historico = if ($obj.historico) { @($obj.historico) } else { @() }
+            trades = if ($obj.trades) { @($obj.trades) } else { @() }
             winRate = if ($obj.winRate) { [decimal]$obj.winRate } else { 0 }
             ultimaTradaEm = if ($obj.ultimaTradaEm) { $obj.ultimaTradaEm } else { $null }
         }
@@ -112,77 +112,30 @@ function Get-MercadoData {
 function Chama-IA {
     param([hashtable]$contexto)
 
+    $memoria = if ($contexto.historico -and $contexto.historico.Count -gt 0) {
+        ($contexto.historico | Select-Object -Last 5 | ForEach-Object { "- $_" }) -join "`n"
+    } else {
+        "(ainda nao pensaste nisto antes, e a primeira vez que conversas sobre isto)"
+    }
+
+    $agentesInfo = if ($contexto.numAgentes -gt 1) { "Tens tambem $($contexto.numAgentes - 1) outra(s) conta(s)/agente(s) que ja criaste antes." } else { "" }
+
     $prompt = @"
-=== PROPRIETARIO DA EMPRESA - AUTONOMIA TOTAL ===
-Tu es o DONO desta empresa de trading. Saldo actual: $($contexto.saldo) EUR
+Tens uma conta na Binance. Saldo actual: $($contexto.saldo) USD.
+O teu objetivo: fazer este saldo crescer ate aos 100 USD. Quando lá chegares, ganhas um descanso.
+$agentesInfo
 
-OBJECTIVOS CLAROS:
-- Se saldo cair abaixo de 20 EUR: MORRES (game over)
-- Se saldo atingir 100 EUR: descansas 24h depois reinicia
-- PODES CRIAR NOVOS AGENTES QUANDO QUISERES para acelerar o crescimento
-- Cada novo agente: 20 EUR capital inicial
+O que ja pensaste sobre isto em conversas anteriores:
+$memoria
 
-ESTADO ACTUAL DA EMPRESA:
-- Saldo do CEO (tu): $($contexto.saldo) EUR
-- Agentes trabalhando: $($contexto.numAgentes)
-- Trades executados: $($contexto.nTrades)
-- Taxa de vitória: $($contexto.winRate)%
-- Capital disponivel para novos agentes: $([Math]::Floor($contexto.saldo / 20)) agentes
-
-MERCADO ACTUAL (pares em movimento):
+Informacao disponivel na tua conta Binance neste momento:
 $($contexto.mercado | ForEach-Object { "- $($_.par): `$$($_.preco) (mudanca 24h: $($_.mudanca24h)%) volume: $($_.volume)" } | Out-String)
 
-=== PODER TOTAL - NENHUMA RESTRICAO ===
-TU DECIDES TUDO:
-- Quanto arriscar por trade
-- Que estrategia usar
-- Quando criar novos agentes (nao precisa pedir permissao a ninguem)
-- Como alocar capital entre agentes
-- Quanto expandir a operacao
+Ninguem te vai dizer o que fazer nem como fazer. Pensa livremente sobre a tua situacao e decide tu mesmo o que fazer a seguir.
 
-=== PENSA COMO CEO ===
-1. ANALISA: Qual eh a melhor estrategia para crescer rapido sem morrer?
-   - Continuo sozinho ou crio novos agentes?
-   - Se mercado esta bom, posso dar risco maior
-   - Se crescer rapido, posso delegar
+No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos que nao se aplicarem, e 0 se nao quiseres criar nada):
 
-2. CONVERSA COMIGO: Explica teu raciocinio
-   - Por que esta estrategia eh boa?
-   - Vale a pena criar novos agentes?
-   - Como me protejo?
-
-3. DECIDE: Que fazes agora?
-   - Compra? Venda? Hold?
-   - Cria novo agente? Quantos?
-
-=== RESPOSTA OBRIGATORIA (CONVERSACAO + JSON PERFEITO) ===
-
-PARTE 1: CONVERSACAO (opcional mas recomendada)
-Pensa em voz alta, explica teu raciocinio, fala dos riscos.
-
-PARTE 2: JSON VALIDO (OBRIGATORIO - DEVE SER PERFEITO)
-Responde EXATAMENTE neste formato JSON, sem aspas extras, sem unidades:
-
-{
-  "acao": "compra",
-  "par": "BTC/USDT",
-  "montante": 5.0,
-  "stopLoss": 10,
-  "alvo": 20,
-  "estrategia": "Compra com stop loss",
-  "risco": "medio",
-  "confianca": 0.7,
-  "raciocinio": "O mercado esta em tendencia positiva",
-  "criarAgentes": 0
-}
-
-CRITICO:
-- montante: APENAS NUMERO (ex: 5.0, nao "5.0 EUR")
-- stopLoss: APENAS NUMERO ou null (ex: 10, nao "10%")
-- alvo: APENAS NUMERO (ex: 20)
-- confianca: NUMERO entre 0 e 1 (ex: 0.7)
-- criarAgentes: NUMERO inteiro (ex: 0, 1, 2)
-- acao, risco: MINUSCULO (compra, venda, hold, baixo, medio, alto, critico)
+{"acao": "...", "par": "...", "montante": ..., "stopLoss": ..., "alvo": ..., "criarAgentes": 0}
 "@
 
     try {
@@ -222,6 +175,11 @@ CRITICO:
                     $confianca = if ($jsonText -match '"confianca["\s:]*"?(\d+\.?\d*)') { [decimal]$matches[1] } else { 0.5 }
                     $criarAgentes = if ($jsonText -match '"criarAgentes["\s:]*"?(\d+)') { [int]$matches[1] } else { 0 }
 
+                    # Guarda o texto de raciocinio livre (tudo antes do bloco JSON) para servir de memoria nos proximos ciclos
+                    $indiceJson = $outputText.IndexOf($jsonText)
+                    $raciocinio = if ($indiceJson -gt 0) { $outputText.Substring(0, $indiceJson).Trim() } else { "" }
+                    if ([string]::IsNullOrWhiteSpace($raciocinio)) { $raciocinio = "(sem texto de raciocinio nesta resposta)" }
+
                     $deciso = @{
                         acao = $acao
                         par = $par
@@ -231,7 +189,7 @@ CRITICO:
                         estrategia = $estrategia
                         risco = $risco
                         confianca = $confianca
-                        raciocinio = "Extraido diretamente do JSON via regex"
+                        raciocinio = $raciocinio
                         criarAgentes = $criarAgentes
                     }
 
@@ -262,7 +220,7 @@ CRITICO:
                     estrategia = "Extraida do texto"
                     risco = $risco
                     confianca = $confianca
-                    raciocinio = "Valores extraidos da resposta textual"
+                    raciocinio = $outputText.Trim()
                     criarAgentes = 0
                 }
             }
@@ -425,8 +383,17 @@ function Executa-Ciclo {
         winRate = $estado.winRate
         mercado = $dadosMercado
         numAgentes = $numAgentes
+        historico = $estado.historico
     }
     $deciso = Chama-IA -contexto $contexto
+
+    # Guarda o raciocinio deste ciclo como memoria para os proximos (ela "conversa consigo mesma" ao longo do tempo)
+    if ($deciso.raciocinio) {
+        $estado.historico += $deciso.raciocinio
+        if ($estado.historico.Count -gt 20) {
+            $estado.historico = $estado.historico | Select-Object -Last 20
+        }
+    }
 
     Log "Decisao: $($deciso | ConvertTo-Json -Compress)" "IA"
 
