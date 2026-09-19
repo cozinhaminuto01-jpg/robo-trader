@@ -284,12 +284,22 @@ No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos
             # para nao poluir nem o parsing nem a memoria guardada entre ciclos
             $outputText = [System.Text.RegularExpressions.Regex]::Replace($outputText, '\x1b(\[[0-9;?]*[a-zA-Z]|\][^\x07]*\x07)', '')
             # Remove caracteres de substituicao Unicode (lixo do spinner "a pensar..." do Ollama,
-            # corrompido pela dupla conversao de encoding) para nao poluir o parsing nem a memoria
-            $outputText = $outputText -replace '�', ''
+            # corrompido pela dupla conversao de encoding) para nao poluir o parsing nem a memoria.
+            # Usa o codepoint numerico (0xFFFD), nao o caracter literal, pela mesma razao do
+            # bloco Braille abaixo: um caracter literal no ficheiro fica a merce da codepage
+            # com que o Windows le este .ps1.
+            $caracterSubstituicao = [char]0xFFFD
+            $outputText = $outputText -replace $caracterSubstituicao, ''
             # Agora que a decodificacao esta correta, o spinner do Ollama aparece como os seus
             # proprios caracteres reais (Braille, ex: "⠙⠹⠸⠼"), ja nao como "�" - remove tambem
-            # este bloco Unicode especifico (usado so por animacoes de spinner em CLIs)
-            $outputText = [System.Text.RegularExpressions.Regex]::Replace($outputText, '[⠀-⣿]', '')
+            # este bloco Unicode especifico (usado so por animacoes de spinner em CLIs).
+            # Construido a partir dos codepoints numericos (0x2800-0x28FF), nunca de
+            # caracteres Braille literais no ficheiro: caracteres literais ficam a merce
+            # da codepage com que o Windows le este .ps1, podendo trocar a sua ordem e
+            # partir o regex com "Intervalo [x-y] em ordem inversa".
+            $brailleInicio = [char]0x2800
+            $brailleFim = [char]0x28FF
+            $outputText = [System.Text.RegularExpressions.Regex]::Replace($outputText, "[$brailleInicio-$brailleFim]", '')
             Log "========== RESPOSTA COMPLETA DO MISTRAL ==========" "IA"
             Log $outputText "IA"
             Log "========== FIM RESPOSTA ==========" "IA"
