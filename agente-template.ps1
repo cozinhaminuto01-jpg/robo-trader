@@ -127,6 +127,7 @@ RESPONDE APENAS COM JSON (nenhuma outra explicacao):
             $jsonMatch = $outputText -match '\{[^{}]*"acao"[^{}]*\}'
             if ($jsonMatch) {
                 $jsonText = $matches[0]
+                $jsonText = $jsonText -replace '\s+', ' '
                 Log "JSON extraido: $jsonText" "DEBUG"
                 try {
                     $deciso = $jsonText | ConvertFrom-Json
