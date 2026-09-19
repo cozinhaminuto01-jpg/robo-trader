@@ -250,10 +250,35 @@ No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos
         # output do Ollama ja vem correta - manter aquela dupla conversao aqui em cima
         # disto corromperia texto que ja esta certo (foi o que causou a corrupcao "?"
         # e "�" vista depois de aplicar o fix da consola)
-        $output = & ollama run mistral $prompt 2>&1
+        #
+        # FIX CRITICO: o prompt e passado via STDIN (pipe), nao como argumento de linha
+        # de comando. Quando o prompt continha algo como "mudanca 24h: -1.2%)", o ollama
+        # (biblioteca de CLI em Go) interpretava "-1" como uma FLAG desconhecida e falhava
+        # de imediato ("Error: unknown shorthand flag") sem sequer consultar o modelo -
+        # e essa mensagem de erro ainda era guardada como se fosse raciocinio dela.
+        # Passar por stdin evita todo o parsing de argumentos da linha de comando.
+        $output = $prompt | & ollama run mistral 2>&1
 
         if ($output) {
             $outputText = $output -join "`n"
+
+            # Se o proprio comando ollama falhou (erro de CLI, processo nao encontrado, etc.),
+            # isto NAO e uma resposta dela - nunca deve ser guardado como raciocinio/memoria.
+            # Sem isto, uma mensagem de erro do sistema era gravada como se fosse algo que
+            # ela pensou, e depois devolvida a ela propria no proximo ciclo como "memoria".
+            if ($outputText -match '^Error:|RemoteException|is not recognized as|ollama: command not found') {
+                Log "Ollama falhou a responder (erro de CLI, nao do modelo): $outputText" "ERRO"
+                return @{
+                    acao = "hold"
+                    par = $null
+                    risco = "baixo"
+                    confianca = 0
+                    estrategia = "Erro de comunicacao com o Ollama"
+                    raciocinio = "(sem resposta - falha tecnica na chamada ao Ollama, nao gravado como pensamento)"
+                    criarAgentes = 0
+                }
+            }
+
             # Remove codigos ANSI de escape do terminal (ex: [2D[K) antes de qualquer uso,
             # para nao poluir nem o parsing nem a memoria guardada entre ciclos
             $outputText = [System.Text.RegularExpressions.Regex]::Replace($outputText, '\x1b(\[[0-9;?]*[a-zA-Z]|\][^\x07]*\x07)', '')
