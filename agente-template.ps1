@@ -285,6 +285,10 @@ No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos
             # Remove caracteres de substituicao Unicode (lixo do spinner "a pensar..." do Ollama,
             # corrompido pela dupla conversao de encoding) para nao poluir o parsing nem a memoria
             $outputText = $outputText -replace '�', ''
+            # Agora que a decodificacao esta correta, o spinner do Ollama aparece como os seus
+            # proprios caracteres reais (Braille, ex: "⠙⠹⠸⠼"), ja nao como "�" - remove tambem
+            # este bloco Unicode especifico (usado so por animacoes de spinner em CLIs)
+            $outputText = [System.Text.RegularExpressions.Regex]::Replace($outputText, '[⠀-⣿]', '')
             Log "========== RESPOSTA COMPLETA DO MISTRAL ==========" "IA"
             Log $outputText "IA"
             Log "========== FIM RESPOSTA ==========" "IA"
