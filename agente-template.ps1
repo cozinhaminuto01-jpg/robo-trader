@@ -471,7 +471,9 @@ function Classifica-Acao {
     $a = $acao.ToLower()
 
     if ($a -match "vend|sair|fechar") { return "venda" }
-    if ($a -match "^hold$|manter|aguardar|esperar|^nada$") { return "hold" }
+    # "mant" cobre manter/mantenho/mantendo/mantenha e tambem "mantener" (espanhol) -
+    # ela por vezes desvia para espanhol ou ingles a meio da resposta em portugues
+    if ($a -match "hold|keep|mant|aguardar|esperar|nada") { return "hold" }
     return "compra"
 }
 
