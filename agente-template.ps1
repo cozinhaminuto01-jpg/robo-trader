@@ -28,6 +28,13 @@ try {
 # Carrega config
 $config = Get-Content $ConfigPath -Encoding UTF8 | ConvertFrom-Json
 
+# Quantos ciclos de pura observacao (sem trades reais) antes do primeiro compra/reforco -
+# ela continua a pensar e a decidir livremente desde o ciclo 1, sem qualquer orientacao
+# de estrategia; isto so atrasa a EXECUCAO de uma compra/reforco real, dando-lhe mais
+# ciclos de mercado observado antes de arriscar dinheiro pela primeira vez. Configuravel
+# via "ciclos_aprendizagem" no config; 5 por omissao se nao estiver definido.
+$ciclosAprendizagem = if ($config.ciclos_aprendizagem) { [int]$config.ciclos_aprendizagem } else { 5 }
+
 # Estado do agente
 $estado = @{
     id = $AgenteID
@@ -40,6 +47,7 @@ $estado = @{
     winRate = 0
     ultimaTradaEm = $null
     ultimaPesquisa = $null
+    precoHistorico = @()
 }
 
 # Ficheiro de log pessoal
@@ -163,6 +171,7 @@ function Load-Estado {
             winRate = if ($obj.winRate) { [decimal]$obj.winRate } else { 0 }
             ultimaTradaEm = if ($obj.ultimaTradaEm) { $obj.ultimaTradaEm } else { $null }
             ultimaPesquisa = if ($obj.ultimaPesquisa) { $obj.ultimaPesquisa } else { $null }
+            precoHistorico = if ($obj.precoHistorico) { @($obj.precoHistorico) } else { @() }
         }
     }
     return $null
@@ -494,7 +503,7 @@ function Avanca-Mercado {
 }
 
 function Get-MercadoData {
-    param([hashtable]$precos, [hashtable]$variacoes, [hashtable]$volumes = $null)
+    param([hashtable]$precos, [hashtable]$variacoes, [hashtable]$volumes = $null, [array]$precoHistorico = @())
 
     $pares = @()
     foreach ($par in $precos.Keys) {
@@ -506,29 +515,120 @@ function Get-MercadoData {
             # nao existe volume nenhum para mostrar - inventar um numero apenas
             # preencheria a conversa com informacao falsa sem qualquer utilidade
             volume = if ($volumes -and $volumes.ContainsKey($par)) { [Math]::Round($volumes[$par], 2) } else { $null }
+            # Variacoes de 1h/6h calculadas a partir do historico local de precos (nao
+            # vem da Binance) - a mudanca24h por si so nao diz se um movimento e recente
+            # ou se vem de ha muitas horas, o que dificultava perceber a tendencia real
+            mudanca1h = Calcula-VariacaoHistorica -precoHistorico $precoHistorico -par $par -precoAtual $precos[$par] -minutosAlvo 60
+            mudanca6h = Calcula-VariacaoHistorica -precoHistorico $precoHistorico -par $par -precoAtual $precos[$par] -minutosAlvo 360
         }
     }
     return $pares | Get-Random -Count (Get-Random -Minimum 2 -Maximum ($pares.Count + 1))
+}
+
+# Guarda um instantaneo dos precos atuais a cada ciclo, para calcular variacoes de 1h/6h
+# sem depender de mais chamadas a Binance - a variacao24h que a Binance ja da nao chega
+# para perceber se um movimento e recente ou se vem de ha muitas horas
+function Atualiza-PrecoHistorico {
+    param([array]$precoHistorico, [hashtable]$precosAtuais)
+
+    $agora = Get-Date
+    $novoHistorico = @($precoHistorico) + @{
+        timestamp = $agora.ToString("yyyy-MM-ddTHH:mm:ss")
+        precos = $precosAtuais
+    }
+
+    # So guarda as ultimas ~7h de instantaneos - chega para calcular a variacao de 6h
+    # com alguma margem, sem o ficheiro de estado crescer sem limite
+    $limiar = $agora.AddHours(-7)
+    $novoHistorico = @($novoHistorico | Where-Object {
+        try { [DateTime]::Parse($_.timestamp) -ge $limiar } catch { $true }
+    })
+
+    return ,$novoHistorico
+}
+
+# Procura no historico local o instantaneo mais proximo de X minutos atras e calcula a
+# variacao percentual do preco desse par desde ai ate ao preco atual
+function Calcula-VariacaoHistorica {
+    param([array]$precoHistorico, [string]$par, [decimal]$precoAtual, [int]$minutosAlvo)
+
+    if (-not $precoHistorico -or $precoHistorico.Count -eq 0) { return $null }
+
+    $agora = Get-Date
+    $alvoTimestamp = $agora.AddMinutes(-$minutosAlvo)
+
+    $melhorCandidato = $null
+    $melhorDiferenca = $null
+    foreach ($instantaneo in $precoHistorico) {
+        try { $ts = [DateTime]::Parse($instantaneo.timestamp) } catch { continue }
+        # So considera instantaneos com pelo menos metade da idade alvo, para nao usar
+        # o preco de ha 2 minutos como se fosse "a variacao de 1h"
+        if ($ts -gt $agora.AddMinutes(-($minutosAlvo * 0.5))) { continue }
+        $diferenca = [Math]::Abs(($ts - $alvoTimestamp).TotalSeconds)
+        if ($null -eq $melhorDiferenca -or $diferenca -lt $melhorDiferenca) {
+            $melhorDiferenca = $diferenca
+            $melhorCandidato = $instantaneo
+        }
+    }
+
+    if (-not $melhorCandidato) { return $null }
+
+    $precoAntigo = $melhorCandidato.precos.$par
+    if (-not $precoAntigo -or $precoAntigo -eq 0) { return $null }
+
+    return [Math]::Round((($precoAtual - [decimal]$precoAntigo) / [decimal]$precoAntigo) * 100, 3)
 }
 
 # ============================================================================
 # CHAMADA A IA (Ollama/Mistral - IA Local)
 # ============================================================================
 
+# Resume o historico estruturado (ciclosHistorico, nao o texto cru) em factos concretos
+# - quantas vezes fez cada acao, resultado das posicoes fechadas - em vez de repetir os
+# paragrafos inteiros das ultimas respostas dela. Isto da-lhe mais sinal util por menos
+# texto do que reler o mesmo raciocinio 3 vezes seguidas.
+function Resume-Historico {
+    param([array]$ciclosHistorico)
+
+    if (-not $ciclosHistorico -or $ciclosHistorico.Count -eq 0) {
+        return "(ainda nao pensaste nisto antes, e a primeira vez que conversas sobre isto)"
+    }
+
+    $recentes = @($ciclosHistorico | Select-Object -Last 20)
+
+    $porAcao = $recentes | Group-Object -Property acao | Sort-Object Count -Descending
+    $resumoAcoes = ($porAcao | ForEach-Object { "$($_.Name): $($_.Count)x" }) -join ", "
+
+    $fechados = @($recentes | Where-Object { $null -ne $_.resultado })
+    $resumoFechados = if ($fechados.Count -gt 0) {
+        $ganhoTotal = [Math]::Round((($fechados | Measure-Object -Property ganho -Sum).Sum), 2)
+        "Fechaste $($fechados.Count) posicao(oes) nesse periodo, com um ganho total de $ganhoTotal EUR."
+    } else {
+        "Nao fechaste nenhuma posicao nesse periodo."
+    }
+
+    $ultimo = $recentes | Select-Object -Last 1
+    $ultimoRaciocinio = $ultimo.raciocinio
+    if ($ultimoRaciocinio -and $ultimoRaciocinio.Length -gt 350) {
+        $ultimoRaciocinio = $ultimoRaciocinio.Substring(0, 350) + "(...)"
+    }
+
+    return "Nos ultimos $($recentes.Count) ciclos, as tuas decisoes foram: $resumoAcoes. $resumoFechados`nO teu ultimo pensamento foi: $ultimoRaciocinio"
+}
+
 function Chama-IA {
     param([hashtable]$contexto)
 
-    # So mostra os ultimos 3 pensamentos (nao 5) e cada um cortado a ~350 caracteres - um
-    # historico completo e muito longo (ela por vezes escreve varios paragrafos) estava a
-    # fazer o prompt crescer para milhares de palavras de texto repetido a cada ciclo, o
-    # que a levava a citar o proprio prompt de volta como se fosse a resposta dela, e a
-    # confundir-se sobre unidades (quantidade de ETH em vez de USD a investir). O historico
-    # completo continua guardado no estado para o dashboard - isto so encurta o que lhe e
-    # relembrado a cada ciclo, nao apaga nada
-    $memoria = if ($contexto.historico -and $contexto.historico.Count -gt 0) {
-        ($contexto.historico | Select-Object -Last 3 | ForEach-Object {
-            if ($_.Length -gt 350) { "- $($_.Substring(0, 350))(...)" } else { "- $_" }
-        }) -join "`n"
+    # Usa um resumo estruturado (contagens de acoes, resultado das posicoes fechadas) em
+    # vez de repetir os paragrafos inteiros das ultimas respostas - um historico completo
+    # e muito longo (ela por vezes escreve varios paragrafos) estava a fazer o prompt
+    # crescer para milhares de palavras de texto repetido a cada ciclo, o que a levava a
+    # citar o proprio prompt de volta como se fosse a resposta dela, e a confundir-se
+    # sobre unidades (quantidade de ETH em vez de USD a investir). O historico completo
+    # continua guardado no estado para o dashboard - isto so muda o que lhe e relembrado
+    # a cada ciclo, nao apaga nada
+    $memoria = if ($contexto.ciclosHistorico -and $contexto.ciclosHistorico.Count -gt 0) {
+        Resume-Historico -ciclosHistorico $contexto.ciclosHistorico
     } else {
         "(ainda nao pensaste nisto antes, e a primeira vez que conversas sobre isto)"
     }
@@ -565,7 +665,7 @@ O que ja pensaste sobre isto em conversas anteriores:
 $memoria
 $pesquisaTexto
 Informacao disponivel na tua conta Binance neste momento:
-$($contexto.mercado | ForEach-Object { "- $($_.par): `$$($_.preco) (mudanca 24h: $($_.mudanca24h)%)$(if ($null -ne $_.volume) { " volume: $($_.volume)" })" } | Out-String)
+$($contexto.mercado | ForEach-Object { "- $($_.par): `$$($_.preco) (mudanca 24h: $($_.mudanca24h)%$(if ($null -ne $_.mudanca6h) { ", 6h: $($_.mudanca6h)%" })$(if ($null -ne $_.mudanca1h) { ", 1h: $($_.mudanca1h)%" }))$(if ($null -ne $_.volume) { " volume: $($_.volume)" })" } | Out-String)
 
 Ninguem te vai dizer o que fazer nem como fazer. Pensa livremente sobre a tua situacao e decide tu mesmo o que fazer a seguir - podes abrir uma posicao nova, reforcar ou vender uma que ja tens, ou nao fazer nada agora.
 
@@ -1198,7 +1298,8 @@ function Executa-Ciclo {
     }
     $estado.posicoes = $posicoesFinal
 
-    $dadosMercado = Get-MercadoData -precos $precosAtuais -variacoes $variacoes -volumes $volumesReais
+    $estado.precoHistorico = Atualiza-PrecoHistorico -precoHistorico $estado.precoHistorico -precosAtuais $precosAtuais
+    $dadosMercado = Get-MercadoData -precos $precosAtuais -variacoes $variacoes -volumes $volumesReais -precoHistorico $estado.precoHistorico
 
     $numAgentes = 0
     if (Test-Path ".\agentes-ativos.json") {
@@ -1226,6 +1327,7 @@ function Executa-Ciclo {
         mercado = $dadosMercado
         numAgentes = $numAgentes
         historico = $estado.historico
+        ciclosHistorico = $estado.ciclosHistorico
         posicoes = $posicoesContexto
         ultimaPesquisa = $estado.ultimaPesquisa
     }
@@ -1274,7 +1376,13 @@ function Executa-Ciclo {
     $tipoAcao = Classifica-Acao -acao $deciso.acao
     $trade = $null
 
-    if ($tipoAcao -eq "compra" -and -not $deciso.par) {
+    if ($tipoAcao -eq "compra" -and $ciclo -le $ciclosAprendizagem) {
+        # So atrasa a execucao real - a decisao dela (raciocinio, acao escolhida) fica
+        # registada na memoria dela normalmente, exatamente como se tivesse decidido
+        # comprar mas nao tivesse fundos: ela continua a pensar e a decidir sozinha,
+        # so nao arrisca dinheiro real nestes primeiros ciclos de observacao do mercado
+        Log "AVISO: Ainda em periodo de observacao (ciclo $ciclo de $ciclosAprendizagem) - decisao de comprar/reforcar registada, mas sem trade real ainda." "AVISO"
+    } elseif ($tipoAcao -eq "compra" -and -not $deciso.par) {
         Log "AVISO: Quis comprar mas nao especificou um par." "AVISO"
     } elseif ($tipoAcao -eq "compra") {
         $parResolvido = Resolve-Par -par $deciso.par -precosAtuais $precosAtuais
