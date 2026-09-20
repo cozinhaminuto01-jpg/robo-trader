@@ -513,7 +513,7 @@ Ninguem te vai dizer o que fazer nem como fazer. Pensa livremente sobre a tua si
 
 (Escreve os teus pensamentos em portugues - isto e so para eu conseguir acompanhar o que pensas, nao influencia em nada a tua decisao.)
 
-No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos que nao se aplicarem, e 0 se nao quiseres criar nada):
+No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos que nao se aplicarem, e 0 se nao quiseres criar nada). O "montante" e sempre o valor em USD que queres investir (nao a quantidade de moeda) - por exemplo, para comprar 20 USD de ETH e "montante": 20, seja qual for o preco do ETH:
 
 {"acao": "...", "par": "...", "montante": ..., "stopLoss": ..., "alvo": ..., "criarAgentes": 0}
 "@
@@ -600,7 +600,7 @@ No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos
                     $par = if ($jsonText -match '"?par"?\s*:[\s"]*([A-Za-z0-9]+(?:\s*/\s*[A-Za-z0-9]+)?)' -and $matches[1] -ne 'null') { ($matches[1] -replace '\s', '').ToUpper() } else { $null }
                     $montante = if ($jsonText -match '"?montante"?\s*:[\s"]*(\d+\.?\d*)') { [decimal]$matches[1] } else { 5.0 }
                     $stopLoss = if ($jsonText -match '"?stopLoss"?\s*:[\s"]*(\d+\.?\d*)') { [decimal]$matches[1] } else { $null }
-                    $alvo = if ($jsonText -match '"?alvo"?\s*:[\s"]*(\d+\.?\d*)') { [decimal]$matches[1] } else { 10 }
+                    $alvo = if ($jsonText -match '"?alvo"?\s*:[\s"]*(\d+\.?\d*)') { [decimal]$matches[1] } else { $null }
                     $estrategia = if ($jsonText -match '"?estrategia"?\s*:[\s"]*([^"]*)"') { $matches[1] } else { "Extraida da IA" }
                     $risco = if ($jsonText -match '"?risco"?\s*:[\s"]*([a-zA-Z]+)') { $matches[1].ToLower() } else { "baixo" }
                     $confianca = if ($jsonText -match '"?confianca"?\s*:[\s"]*(\d+\.?\d*)') { [decimal]$matches[1] } else { 0.5 }
@@ -637,7 +637,7 @@ No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos
                 $par = if ($outputText -match '"?par"?\s*:[\s"]*([A-Za-z0-9]+(?:\s*/\s*[A-Za-z0-9]+)?)' -and $matches[1] -ne 'null') { ($matches[1] -replace '\s', '').ToUpper() } else { $null }
                 $montante = if ($outputText -match '"?montante"?\s*:[\s"]*(\d+\.?\d*)') { [decimal]$matches[1] } else { 5.0 }
                 $stopLoss = if ($outputText -match '"?stopLoss"?\s*:[\s"]*(\d+\.?\d*)') { [decimal]$matches[1] } else { $null }
-                $alvo = if ($outputText -match '"?alvo"?\s*:[\s"]*(\d+\.?\d*)') { [decimal]$matches[1] } else { 10 }
+                $alvo = if ($outputText -match '"?alvo"?\s*:[\s"]*(\d+\.?\d*)') { [decimal]$matches[1] } else { $null }
                 $risco = if ($outputText -match '"?risco"?\s*:[\s"]*([a-z]+)') { $matches[1] } else { "baixo" }
                 $confianca = if ($outputText -match '"?confi[a-z]*"?\s*:[\s"]*(\d\.?\d*)') { [decimal]$matches[1] } else { 0.5 }
 
@@ -1122,6 +1122,8 @@ function Executa-Ciclo {
                 Cria-NovoAgente -numeroAgente $proximoID -capital 20
                 $estado.saldo -= 20
                 Log "Novo agente criado. Saldo restante: $($estado.saldo) EUR" "INFO"
+            } else {
+                Log "AVISO: Quis criar um novo agente mas so ha $($estado.saldo) EUR na conta (minimo: 20 EUR). Sem novo agente." "AVISO"
             }
         }
     }
