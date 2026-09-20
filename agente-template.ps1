@@ -191,8 +191,16 @@ $script:FiltrosBinanceCache = @{}
 # de este codigo existir; aceita tambem os nomes binance_api_key_testnet/secret_testnet
 # usados no template do repositorio, para funcionar com qualquer um dos dois sem
 # obrigar a editar o ficheiro outra vez.
-function Get-BinanceKey { if ($config.binance_testnet_key) { return $config.binance_testnet_key }; return $config.binance_api_key_testnet }
-function Get-BinanceSecret { if ($config.binance_testnet_secret) { return $config.binance_testnet_secret }; return $config.binance_api_secret_testnet }
+function Get-BinanceKey {
+    $valor = if ($config.binance_testnet_key) { $config.binance_testnet_key } else { $config.binance_api_key_testnet }
+    if ($valor) { return $valor.Trim() }
+    return $valor
+}
+function Get-BinanceSecret {
+    $valor = if ($config.binance_testnet_secret) { $config.binance_testnet_secret } else { $config.binance_api_secret_testnet }
+    if ($valor) { return $valor.Trim() }
+    return $valor
+}
 
 function Tem-BinanceConfigurado {
     $key = Get-BinanceKey
@@ -922,6 +930,16 @@ function Executa-Ciclo {
     # reais (dinheiro sempre falso, conta de testes da propria Binance) - sem chaves,
     # mantem-se o mercado simulado localmente como ate aqui
     $usaBinanceReal = Tem-BinanceConfigurado
+    if ($usaBinanceReal -and -not $script:DiagnosticoBinanceMostrado) {
+        # So uma vez por execucao - nunca regista a key/secret em si, so o comprimento,
+        # para ajudar a diagnosticar um erro tipo "API-key format invalid" (normalmente
+        # significa que a key nao foi gerada em testnet.binance.vision, ou tem espacos/
+        # caracteres a mais) sem expor nada sensivel no log
+        $keyDiag = Get-BinanceKey
+        $secretDiag = Get-BinanceSecret
+        Log "Binance Testnet configurada - key com $($keyDiag.Length) caracteres, secret com $($secretDiag.Length) caracteres" "INFO"
+        $script:DiagnosticoBinanceMostrado = $true
+    }
     if ($usaBinanceReal) {
         $dadosBinance = Get-BinanceDadosMercado
         if ($dadosBinance) {
