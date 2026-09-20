@@ -520,6 +520,10 @@ function Classifica-Acao {
     # e "maintain") seja interpretada por omissao como uma ordem de compra real.
     if ($a -match "vend|sair|fechar|close|sell") { return "venda" }
     if ($a -match "compra|comprar|buy|abrir|refor|reinforce|aumentar|adicionar|entrar|invest|^open$|purchase|acquire|^long$") { return "compra" }
+    # Ela pode querer so mudar o stop loss/alvo de uma posicao que ja tem, sem reforcar
+    # nem vender nada (ex: "setStopLoss", "ajustar") - a Binance real tambem permite
+    # alterar uma ordem de stop loss/take profit sem mexer na posicao em si
+    if ($a -match "ajust|atualiz|alterar|modificar|stoploss|takeprofit") { return "ajustar" }
     return "hold"
 }
 
@@ -590,6 +594,26 @@ function Abre-OuAdiciona-Posicao {
         abertoEm = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
     }
     return ,(@($posicoes) + @($novaPosicao))
+}
+
+# Ajusta so o stopLoss/alvo de uma posicao que ja tem aberta, sem tocar na quantidade,
+# no montante investido ou no preco de entrada - equivalente a alterar uma ordem de
+# stop loss/take profit numa exchange real sem mexer na posicao em si.
+function Ajusta-Risco-Posicao {
+    param([array]$posicoes, [string]$par, [decimal]$precoAtual, $stopLoss, $alvo)
+
+    $existente = $posicoes | Where-Object { $_.par -eq $par } | Select-Object -First 1
+    if (-not $existente) { return @{ posicoes = $posicoes; ajustado = $false } }
+
+    $stopLossInterpretado = Interpreta-Percentagem -valor $stopLoss -precoReferencia $precoAtual
+    $alvoInterpretado = Interpreta-Percentagem -valor $alvo -precoReferencia $precoAtual
+
+    # Mesma regra universal de sinal usada ao abrir posicao: stop loss e sempre baixa,
+    # alvo e sempre subida, seja qual for o sinal com que ela escreveu o numero
+    if ($null -ne $stopLossInterpretado) { $existente.stopLoss = -[Math]::Abs($stopLossInterpretado) }
+    if ($null -ne $alvoInterpretado) { $existente.alvo = [Math]::Abs($alvoInterpretado) }
+
+    return @{ posicoes = ,$posicoes; ajustado = $true; stopLoss = $existente.stopLoss; alvo = $existente.alvo }
 }
 
 function Fecha-Posicao {
@@ -854,6 +878,22 @@ function Executa-Ciclo {
                 Log "TRADE: Vendeu $($deciso.par) | Resultado: $($fecho.resultado.resultadoPct)% | Ganho: $($fecho.resultado.ganho) EUR" "TRADE"
             } else {
                 Log "AVISO: Pediu para vender $($deciso.par) mas nao tem posicao aberta nesse par." "AVISO"
+            }
+        }
+    } elseif ($tipoAcao -eq "ajustar" -and -not $deciso.par) {
+        Log "AVISO: Quis ajustar stopLoss/alvo mas nao especificou um par." "AVISO"
+    } elseif ($tipoAcao -eq "ajustar") {
+        $parResolvido = Resolve-Par -par $deciso.par -precosAtuais $precosAtuais
+        $precoAtualPar = if ($parResolvido) { $precosAtuais[$parResolvido] } else { $null }
+        if (-not $precoAtualPar) {
+            Log "AVISO: Par '$($deciso.par)' desconhecido no mercado. Sem ajuste." "AVISO"
+        } else {
+            $ajuste = Ajusta-Risco-Posicao -posicoes $estado.posicoes -par $parResolvido -precoAtual $precoAtualPar -stopLoss $deciso.stopLoss -alvo $deciso.alvo
+            if ($ajuste.ajustado) {
+                $estado.posicoes = $ajuste.posicoes
+                Log "AJUSTE: $parResolvido - novo stopLoss: $($ajuste.stopLoss)% | novo alvo: $($ajuste.alvo)%" "TRADE"
+            } else {
+                Log "AVISO: Pediu para ajustar $($deciso.par) mas nao tem posicao aberta nesse par." "AVISO"
             }
         }
     } else {
