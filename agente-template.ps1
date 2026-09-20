@@ -468,8 +468,17 @@ function Get-MercadoData {
 function Chama-IA {
     param([hashtable]$contexto)
 
+    # So mostra os ultimos 3 pensamentos (nao 5) e cada um cortado a ~350 caracteres - um
+    # historico completo e muito longo (ela por vezes escreve varios paragrafos) estava a
+    # fazer o prompt crescer para milhares de palavras de texto repetido a cada ciclo, o
+    # que a levava a citar o proprio prompt de volta como se fosse a resposta dela, e a
+    # confundir-se sobre unidades (quantidade de ETH em vez de USD a investir). O historico
+    # completo continua guardado no estado para o dashboard - isto so encurta o que lhe e
+    # relembrado a cada ciclo, nao apaga nada
     $memoria = if ($contexto.historico -and $contexto.historico.Count -gt 0) {
-        ($contexto.historico | Select-Object -Last 5 | ForEach-Object { "- $_" }) -join "`n"
+        ($contexto.historico | Select-Object -Last 3 | ForEach-Object {
+            if ($_.Length -gt 350) { "- $($_.Substring(0, 350))(...)" } else { "- $_" }
+        }) -join "`n"
     } else {
         "(ainda nao pensaste nisto antes, e a primeira vez que conversas sobre isto)"
     }
