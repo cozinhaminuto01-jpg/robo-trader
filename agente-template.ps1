@@ -505,7 +505,11 @@ function Classifica-Acao {
     if ($a -match "vend|sair|fechar") { return "venda" }
     # "mant" cobre manter/mantenho/mantendo/mantenha e tambem "mantener" (espanhol) -
     # ela por vezes desvia para espanhol ou ingles a meio da resposta em portugues
-    if ($a -match "hold|keep|mant|aguardar|esperar|nada") { return "hold" }
+    # "mant" cobre manter/mantenho/mantendo/mantenha/mantener (espanhol); "maintain" (ingles)
+    # precisa de ser listado a parte, porque a grafia inglesa tem um "i" a meio e nao
+    # contem "mant" seguido (m-a-i-n-t...) - foi o que causou uma compra indevida quando
+    # ela respondeu "maintain" em vez de "manter"
+    if ($a -match "hold|keep|mant|maintain|aguardar|esperar|nada") { return "hold" }
     return "compra"
 }
 
