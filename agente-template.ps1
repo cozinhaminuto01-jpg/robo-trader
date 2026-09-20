@@ -9,7 +9,8 @@ param(
     [string]$AgenteID = "Agente_1",
     [decimal]$SaldoInicial = 20,
     [string]$ConfigPath = ".\config-testnet.json",
-    [decimal]$ObjetivoPatrimonio = 1000
+    [decimal]$ObjetivoPatrimonio = 1000,
+    [string]$MissaoAtribuida = ""
 )
 
 # FIX ENCODING: O Windows PowerShell 5.1 escreve na consola e em ficheiros usando o
@@ -485,6 +486,8 @@ function Chama-IA {
 
     $agentesInfo = if ($contexto.numAgentes -gt 1) { "Tens tambem $($contexto.numAgentes - 1) outra(s) conta(s)/agente(s) que ja criaste antes." } else { "" }
 
+    $missaoTexto = if (-not [string]::IsNullOrWhiteSpace($MissaoAtribuida)) { "`nA conta que te criou deu-te esta missao/foco: `"$MissaoAtribuida`" - tens liberdade total sobre como a cumpres, isto e so orientacao, nao uma regra obrigatoria." } else { "" }
+
     $posicoesTexto = if ($contexto.posicoes -and $contexto.posicoes.Count -gt 0) {
         ($contexto.posicoes | ForEach-Object {
             $pct = if ($_.precoEntrada -gt 0) { [Math]::Round((($_.precoAtual - $_.precoEntrada) / $_.precoEntrada) * 100, 2) } else { 0 }
@@ -496,9 +499,9 @@ function Chama-IA {
 
     $prompt = @"
 Tens uma conta na Binance. Dinheiro disponivel (cash): $($contexto.saldo) USD.
-O teu objetivo: fazer o teu patrimonio total crescer ate aos $ObjetivoPatrimonio USD. Quando lá chegares, ganhas um descanso.
-Se o teu patrimonio total chegar a 0, e o fim - perdes tudo e nao ha volta atras.
-$agentesInfo
+O objetivo e da empresa toda: a soma do patrimonio de todas as contas que fazem parte dela (incluindo a tua, e as que tu proprio criares) tem de chegar aos $ObjetivoPatrimonio USD. Quando a empresa lá chegar, todas as contas ganham um descanso.
+Se O TEU patrimonio chegar a 0, e o fim para ti - perdes tudo e nao ha volta atras (as outras contas da empresa, se houver, continuam).
+$agentesInfo$missaoTexto
 
 As tuas posicoes abertas neste momento:
 $posicoesTexto
@@ -513,9 +516,9 @@ Ninguem te vai dizer o que fazer nem como fazer. Pensa livremente sobre a tua si
 
 (Escreve os teus pensamentos em portugues - isto e so para eu conseguir acompanhar o que pensas, nao influencia em nada a tua decisao.)
 
-No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos que nao se aplicarem, e 0 se nao quiseres criar nada). O "montante" e sempre o valor em USD que queres investir (nao a quantidade de moeda) - por exemplo, para comprar 20 USD de ETH e "montante": 20, seja qual for o preco do ETH:
+No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos que nao se aplicarem, e 0 se nao quiseres criar nada). O "montante" e sempre o valor em USD que queres investir (nao a quantidade de moeda) - por exemplo, para comprar 20 USD de ETH e "montante": 20, seja qual for o preco do ETH. Se pedires "criarAgentes", o novo agente fica na mesma empresa (o objetivo de $ObjetivoPatrimonio USD passa a contar a soma dele com a tua) mas ele pensa e decide por si mesmo - usa "missaoNovoAgente" para lhe dares uma missao/foco (ex: "foca-te so em ADA e XRP"), ou deixa null para lhe dares liberdade total:
 
-{"acao": "...", "par": "...", "montante": ..., "stopLoss": ..., "alvo": ..., "criarAgentes": 0}
+{"acao": "...", "par": "...", "montante": ..., "stopLoss": ..., "alvo": ..., "criarAgentes": 0, "missaoNovoAgente": null}
 "@
 
     try {
@@ -605,6 +608,7 @@ No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos
                     $risco = if ($jsonText -match '"?risco"?\s*:[\s"]*([a-zA-Z]+)') { $matches[1].ToLower() } else { "baixo" }
                     $confianca = if ($jsonText -match '"?confianca"?\s*:[\s"]*(\d+\.?\d*)') { [decimal]$matches[1] } else { 0.5 }
                     $criarAgentes = if ($jsonText -match '"?criarAgentes"?\s*:[\s"]*(\d+)') { [int]$matches[1] } else { 0 }
+                    $missaoNovoAgente = if ($jsonText -match '"?missaoNovoAgente"?\s*:[\s"]*"([^"]*)"' -and $matches[1] -ne 'null') { $matches[1] } else { $null }
 
                     # Guarda o texto de raciocinio livre para servir de memoria nos proximos ciclos.
                     # Ela nem sempre coloca a explicacao antes do JSON - as vezes decide primeiro e
@@ -623,6 +627,7 @@ No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos
                         confianca = $confianca
                         raciocinio = $raciocinio
                         criarAgentes = $criarAgentes
+                        missaoNovoAgente = $missaoNovoAgente
                     }
 
                     Log "IA: Acao=$($deciso.acao), Par=$($deciso.par), Confianca=$($deciso.confianca), CriarAgentes=$($deciso.criarAgentes)" "IA"
@@ -686,16 +691,21 @@ No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos
 # ============================================================================
 
 function Cria-NovoAgente {
-    param([int]$numeroAgente, [decimal]$capital)
+    param([int]$numeroAgente, [decimal]$capital, [string]$missao = "")
 
-    Log "CEO DECISION: Criando novo Agente_$numeroAgente com capital de $capital EUR" "DECISAO"
+    $missaoLog = if ([string]::IsNullOrWhiteSpace($missao)) { "(sem missao especifica, liberdade total)" } else { $missao }
+    Log "CEO DECISION: Criando novo Agente_$numeroAgente com capital de $capital EUR - missao: $missaoLog" "DECISAO"
 
     $novoAgenteFile = ".\agente-$numeroAgente.ps1"
     $conteudoScript = Get-Content ".\agente-template.ps1" -Raw -Encoding UTF8
 
     $conteudoScript | Set-Content $novoAgenteFile -Encoding UTF8
 
-    $job = Start-Job -FilePath $novoAgenteFile -ArgumentList @("Agente_$numeroAgente", $capital, ".\config-testnet.json", $ObjetivoPatrimonio)
+    # A nova conta fica na mesma empresa: corre o proprio Ollama e decide por si mesma a
+    # cada ciclo (nao e o CEO a executar as ordens dela), mas recebe o objetivo/missao que
+    # o CEO lhe deu, e o patrimonio dela passa a contar para o objetivo somado da empresa
+    # (ver Sincroniza-PatrimonioEmpresa).
+    $job = Start-Job -FilePath $novoAgenteFile -ArgumentList @("Agente_$numeroAgente", $capital, ".\config-testnet.json", $ObjetivoPatrimonio, $missao)
 
     Log "Agente_$numeroAgente iniciado (PID: $($job.Id))" "INFO"
 
@@ -709,6 +719,8 @@ function Cria-NovoAgente {
         id = "Agente_$numeroAgente"
         jobId = $job.Id
         capital = $capital
+        patrimonioAtual = $capital
+        missao = $missao
         criadoEm = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
         status = "ativo"
     }
@@ -716,6 +728,55 @@ function Cria-NovoAgente {
     $agentes | ConvertTo-Json | Set-Content ".\agentes-ativos.json" -Encoding UTF8
 
     return @{ id = "Agente_$numeroAgente"; jobId = $job.Id }
+}
+
+function Sincroniza-PatrimonioEmpresa {
+    param([decimal]$patrimonioProprio)
+
+    # Cada conta da empresa (o CEO e cada agente que ele criar) grava aqui o seu proprio
+    # patrimonio mais recente, para que o objetivo dos $ObjetivoPatrimonio USD seja avaliado
+    # pela empresa toda, nao por cada conta isolada. Cada processo so le/escreve a sua
+    # propria entrada - um cruzamento raro de escritas simultaneas de duas contas no mesmo
+    # segundo, quando muito, atrasa a deteccao do objetivo por um ciclo, nunca perde dinheiro
+    # real nem corrompe posicoes.
+    $agentes = @()
+    if (Test-Path ".\agentes-ativos.json") {
+        try {
+            $lido = Get-Content ".\agentes-ativos.json" -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($lido) { $agentes = @($lido) }
+        } catch {
+            $agentes = @()
+        }
+    }
+
+    $entradaPropria = $agentes | Where-Object { $_.id -eq $AgenteID } | Select-Object -First 1
+    if ($entradaPropria) {
+        $entradaPropria.patrimonioAtual = $patrimonioProprio
+    } else {
+        $novaEntrada = @{
+            id = $AgenteID
+            capital = $SaldoInicial
+            patrimonioAtual = $patrimonioProprio
+            missao = $MissaoAtribuida
+            criadoEm = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
+            status = "ativo"
+        }
+        $agentes = @($agentes) + $novaEntrada
+    }
+
+    $agentes | ConvertTo-Json | Set-Content ".\agentes-ativos.json" -Encoding UTF8
+
+    $somaPatrimonio = [decimal]0
+    foreach ($a in $agentes) {
+        if ($a.id -eq $AgenteID) {
+            $somaPatrimonio += $patrimonioProprio
+        } elseif ($null -ne $a.patrimonioAtual) {
+            $somaPatrimonio += [decimal]$a.patrimonioAtual
+        } elseif ($null -ne $a.capital) {
+            $somaPatrimonio += [decimal]$a.capital
+        }
+    }
+    return $somaPatrimonio
 }
 
 # ============================================================================
@@ -1014,8 +1075,12 @@ function Executa-Ciclo {
         throw
     }
 
-    if ($patrimonio -ge $ObjetivoPatrimonio) {
-        Log "OBJETIVO ATINGIDO! Patrimonio: $patrimonio EUR" "SUCESSO"
+    # O objetivo e da empresa toda (esta conta + todas as que ela ou outras tenham criado),
+    # nao so do dinheiro desta conta isolada - ver Sincroniza-PatrimonioEmpresa.
+    $patrimonioEmpresa = Sincroniza-PatrimonioEmpresa -patrimonioProprio $patrimonio
+
+    if ($patrimonioEmpresa -ge $ObjetivoPatrimonio) {
+        Log "OBJETIVO ATINGIDO PELA EMPRESA! Patrimonio somado de todas as contas: $patrimonioEmpresa EUR (o teu: $patrimonio EUR)" "SUCESSO"
         Log "Agente entra em repouso por 24 horas..." "INFO"
         Log "Volta a rodar amanha! Descansando..." "INFO"
         Save-Estado
@@ -1119,7 +1184,7 @@ function Executa-Ciclo {
         for ($i = 1; $i -le $novasAgentes; $i++) {
             $proximoID = $numAgentes + $i
             if ($estado.saldo -ge 20) {
-                Cria-NovoAgente -numeroAgente $proximoID -capital 20
+                Cria-NovoAgente -numeroAgente $proximoID -capital 20 -missao $deciso.missaoNovoAgente
                 $estado.saldo -= 20
                 Log "Novo agente criado. Saldo restante: $($estado.saldo) EUR" "INFO"
             } else {
