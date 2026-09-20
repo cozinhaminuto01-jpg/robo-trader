@@ -92,6 +92,51 @@ function Send-Telegram {
     }
 }
 
+# Limpa o output bruto capturado do Ollama (codigos ANSI do terminal, caracteres de
+# substituicao Unicode e o spinner Braille "a pensar...") - usado tanto na resposta
+# principal dela como na traducao para o Telegram, para nao duplicar esta logica.
+function Limpa-OutputOllama {
+    param([string]$outputText)
+
+    $outputText = [System.Text.RegularExpressions.Regex]::Replace($outputText, '\x1b(\[[0-9;?]*[a-zA-Z]|\][^\x07]*\x07)', '')
+    $caracterSubstituicao = [char]0xFFFD
+    $outputText = $outputText -replace $caracterSubstituicao, ''
+    $brailleInicio = [char]0x2800
+    $brailleFim = [char]0x28FF
+    $outputText = [System.Text.RegularExpressions.Regex]::Replace($outputText, "[$brailleInicio-$brailleFim]", '')
+    return $outputText
+}
+
+# So para a mensagem que chega ao Telegram - traduz o pensamento dela para portugues
+# quando ela escreve noutra lingua (Mistral, sendo um modelo pequeno, nem sempre segue
+# a instrucao de idioma pedida no prompt principal). O raciocinio guardado no historico/
+# memoria dela NAO passa por aqui - fica exatamente como ela escreveu, para nao alterar
+# nada daquilo que ela propria vai reler depois.
+function Traduz-Para-Portugues {
+    param([string]$texto)
+
+    if ([string]::IsNullOrWhiteSpace($texto)) { return $texto }
+
+    try {
+        $promptTraducao = "Traduz o texto seguinte para portugues de Portugal. Responde APENAS com a traducao, sem comentarios, sem aspas a volta, sem repetir o texto original. Se ja estiver em portugues, devolve-o tal e qual.`n`nTexto:`n$texto"
+        $output = $promptTraducao | & ollama run mistral 2>&1
+
+        if (-not $output) { return $texto }
+        $outputText = ($output -join "`n")
+
+        if ($outputText -match '^Error:|RemoteException|is not recognized as|ollama: command not found') {
+            return $texto
+        }
+
+        $outputText = (Limpa-OutputOllama $outputText).Trim()
+        if ([string]::IsNullOrWhiteSpace($outputText)) { return $texto }
+        return $outputText
+    } catch {
+        Log "AVISO: Falha ao traduzir pensamento para o Telegram, a usar original: $_" "AVISO"
+        return $texto
+    }
+}
+
 function Load-Estado {
     if (Test-Path ".\estado-$AgenteID.json") {
         $obj = Get-Content ".\estado-$AgenteID.json" -Encoding UTF8 | ConvertFrom-Json
@@ -282,26 +327,11 @@ No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos
                 }
             }
 
-            # Remove codigos ANSI de escape do terminal (ex: [2D[K) antes de qualquer uso,
-            # para nao poluir nem o parsing nem a memoria guardada entre ciclos
-            $outputText = [System.Text.RegularExpressions.Regex]::Replace($outputText, '\x1b(\[[0-9;?]*[a-zA-Z]|\][^\x07]*\x07)', '')
-            # Remove caracteres de substituicao Unicode (lixo do spinner "a pensar..." do Ollama,
-            # corrompido pela dupla conversao de encoding) para nao poluir o parsing nem a memoria.
-            # Usa o codepoint numerico (0xFFFD), nao o caracter literal, pela mesma razao do
-            # bloco Braille abaixo: um caracter literal no ficheiro fica a merce da codepage
-            # com que o Windows le este .ps1.
-            $caracterSubstituicao = [char]0xFFFD
-            $outputText = $outputText -replace $caracterSubstituicao, ''
-            # Agora que a decodificacao esta correta, o spinner do Ollama aparece como os seus
-            # proprios caracteres reais (Braille, ex: "⠙⠹⠸⠼"), ja nao como "�" - remove tambem
-            # este bloco Unicode especifico (usado so por animacoes de spinner em CLIs).
-            # Construido a partir dos codepoints numericos (0x2800-0x28FF), nunca de
-            # caracteres Braille literais no ficheiro: caracteres literais ficam a merce
-            # da codepage com que o Windows le este .ps1, podendo trocar a sua ordem e
-            # partir o regex com "Intervalo [x-y] em ordem inversa".
-            $brailleInicio = [char]0x2800
-            $brailleFim = [char]0x28FF
-            $outputText = [System.Text.RegularExpressions.Regex]::Replace($outputText, "[$brailleInicio-$brailleFim]", '')
+            # Remove codigos ANSI de escape do terminal, caracteres de substituicao e o
+            # spinner Braille do Ollama antes de qualquer uso, para nao poluir nem o
+            # parsing nem a memoria guardada entre ciclos (mesma limpeza usada na traducao
+            # para o Telegram, ver Limpa-OutputOllama)
+            $outputText = Limpa-OutputOllama $outputText
             Log "========== RESPOSTA COMPLETA DO MISTRAL ==========" "IA"
             Log $outputText "IA"
             Log "========== FIM RESPOSTA ==========" "IA"
@@ -854,8 +884,12 @@ function Executa-Ciclo {
         $estado.ciclosHistorico = $estado.ciclosHistorico | Select-Object -Last 100
     }
 
+    # Traduz so a copia enviada para o Telegram - o raciocinio guardado em $deciso e no
+    # historico dela fica sempre exatamente como ela escreveu, sem qualquer alteracao
+    $raciocinioTelegram = Traduz-Para-Portugues $deciso.raciocinio
+
     $resumoTelegram = "Ciclo #$ciclo - Patrimonio: $patrimonioApos EUR (cash: $($estado.saldo) EUR)`n`n" + `
-        "Pensamento:`n$($deciso.raciocinio)`n`n" + `
+        "Pensamento:`n$raciocinioTelegram`n`n" + `
         "Decisao: $($deciso.acao) $($deciso.montante) em $($deciso.par)" + `
         $(if ($trade) { "`nResultado: $($trade.resultado)% | Ganho: $($trade.ganho) EUR" } else { "" }) + `
         $(if ($fechosAutomaticos.Count -gt 0) { "`n`nFechados automaticamente:`n" + (($fechosAutomaticos | ForEach-Object { "- $($_.par): $($_.estrategia) | Ganho: $($_.ganho) EUR" }) -join "`n") } else { "" })
