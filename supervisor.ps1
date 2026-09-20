@@ -11,7 +11,8 @@
 param(
     [string]$AgenteID = "Agente_1",
     [decimal]$SaldoInicial = 20,
-    [string]$ConfigPath = ".\config-testnet.json"
+    [string]$ConfigPath = ".\config-testnet.json",
+    [decimal]$ObjetivoPatrimonio = 1000
 )
 
 Write-Host "===== SUPERVISOR iniciado para $AgenteID =====" -ForegroundColor Cyan
@@ -27,7 +28,7 @@ while ($true) {
         # Um erro fatal nao apanhado dentro do script invocado tambem mataria este
         # supervisor, a menos que a chamada esteja protegida aqui - e exatamente o
         # tipo de crash que este supervisor existe para sobreviver
-        & ".\agente-template.ps1" -AgenteID $AgenteID -SaldoInicial $SaldoInicial -ConfigPath $ConfigPath
+        & ".\agente-template.ps1" -AgenteID $AgenteID -SaldoInicial $SaldoInicial -ConfigPath $ConfigPath -ObjetivoPatrimonio $ObjetivoPatrimonio
         $codigoSaida = $LASTEXITCODE
     } catch {
         Write-Host "SUPERVISOR: o agente crashou com um erro fatal: $_" -ForegroundColor Red
