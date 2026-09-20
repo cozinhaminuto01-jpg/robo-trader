@@ -961,16 +961,25 @@ function Executa-Ciclo {
         $volumesReais = $null
     }
 
-    if ($usaBinanceReal) {
+    if ($usaBinanceReal -and -not $script:SaldoRealConfirmado) {
+        # NAO sincroniza o saldo dela com o saldo TOTAL da conta testnet - contas
+        # testnet vem com um saldo inicial de fabrica (ex: 10000 USDT) que nada tem a
+        # ver com o capital que lhe foi dado para gerir. O saldo dela continua a ser
+        # o mesmo contador local de sempre (comeca em $SaldoInicial), so que agora as
+        # compras/vendas que decide sao executadas como ordens reais na Binance Testnet,
+        # dentro desse limite - o resto do dinheiro da conta fica de fora, intocado.
+        # So confirma aqui, uma vez, que a conta tem fundos suficientes para cobrir o
+        # capital atribuido, para nao passar o resto da execucao as cegas.
         $saldoReal = Get-BinanceSaldoReal
         if ($null -ne $saldoReal) {
-            if ([Math]::Abs($saldoReal - $estado.saldo) -gt 0.01) {
-                Log "INFO: A sincronizar saldo local ($($estado.saldo) EUR) com o saldo real da Binance Testnet ($saldoReal EUR)" "INFO"
+            Log "Conta Binance Testnet confirmada com $saldoReal USDT disponiveis (capital atribuido a ela: $($estado.saldoInicial) EUR, o resto fica reservado e nunca e usado)" "INFO"
+            if ($saldoReal -lt $estado.saldoInicial) {
+                Log "AVISO: A conta testnet tem menos fundos ($saldoReal USDT) do que o capital atribuido ($($estado.saldoInicial) EUR) - as ordens reais podem falhar por saldo insuficiente" "AVISO"
             }
-            $estado.saldo = $saldoReal
         } else {
-            Log "AVISO: Nao foi possivel confirmar o saldo real da Binance Testnet, a manter o ultimo valor conhecido ($($estado.saldo) EUR)" "AVISO"
+            Log "AVISO: Nao foi possivel confirmar o saldo da conta Binance Testnet" "AVISO"
         }
+        $script:SaldoRealConfirmado = $true
     }
 
     # Patrimonio = dinheiro + valor atual de tudo o que tem investido. E isto que
