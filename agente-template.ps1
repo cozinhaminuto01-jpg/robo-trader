@@ -118,18 +118,27 @@ function Traduz-Para-Portugues {
     if ([string]::IsNullOrWhiteSpace($texto)) { return $texto }
 
     try {
-        $promptTraducao = "Traduz o texto seguinte para portugues de Portugal. Responde APENAS com a traducao, sem comentarios, sem aspas a volta, sem repetir o texto original. Se ja estiver em portugues, devolve-o tal e qual.`n`nTexto:`n$texto"
+        $promptTraducao = "Traduz TODO o texto seguinte para portugues europeu. E MUITO IMPORTANTE: a tua resposta tem de estar inteiramente em portugues, nunca em ingles, espanhol ou qualquer outra lingua, mesmo que o texto original esteja nessas linguas. Nao acrescentes comentarios nem explicacoes, nao repitas o texto original, nao uses aspas a volta - responde APENAS com o texto traduzido.`n`nTexto a traduzir:`n$texto"
+        Log "A traduzir pensamento para o Telegram..." "IA"
         $output = $promptTraducao | & ollama run mistral 2>&1
 
-        if (-not $output) { return $texto }
+        if (-not $output) {
+            Log "AVISO: Traducao nao devolveu nada, a usar texto original no Telegram" "AVISO"
+            return $texto
+        }
         $outputText = ($output -join "`n")
 
         if ($outputText -match '^Error:|RemoteException|is not recognized as|ollama: command not found') {
+            Log "AVISO: Traducao falhou (erro de CLI do Ollama), a usar texto original no Telegram: $outputText" "AVISO"
             return $texto
         }
 
         $outputText = (Limpa-OutputOllama $outputText).Trim()
-        if ([string]::IsNullOrWhiteSpace($outputText)) { return $texto }
+        if ([string]::IsNullOrWhiteSpace($outputText)) {
+            Log "AVISO: Traducao veio vazia apos limpeza, a usar texto original no Telegram" "AVISO"
+            return $texto
+        }
+        Log "Traducao para o Telegram: $outputText" "IA"
         return $outputText
     } catch {
         Log "AVISO: Falha ao traduzir pensamento para o Telegram, a usar original: $_" "AVISO"
