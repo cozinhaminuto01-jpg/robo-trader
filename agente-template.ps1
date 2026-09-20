@@ -1421,8 +1421,16 @@ function Executa-Ciclo {
     }
 
     # Traduz so a copia enviada para o Telegram - o raciocinio guardado em $deciso e no
-    # historico dela fica sempre exatamente como ela escreveu, sem qualquer alteracao
-    $raciocinioTelegram = Traduz-Para-Portugues $deciso.raciocinio
+    # historico dela fica sempre exatamente como ela escreveu, sem qualquer alteracao.
+    # Quando nao ha texto real (so o placeholder), pular a traducao: dar a um modelo
+    # pequeno uma frase quase vazia para "traduzir" e o que mais o leva a divagar e
+    # inventar conteudo completamente aleatorio (ja aconteceu: perguntas sobre a
+    # capital de Franca) - e o placeholder ja esta em portugues, nao precisa traduzir.
+    $raciocinioTelegram = if ($deciso.raciocinio -eq "(sem texto de raciocinio nesta resposta)") {
+        $deciso.raciocinio
+    } else {
+        Traduz-Para-Portugues $deciso.raciocinio
+    }
 
     $resumoTelegram = "Ciclo #$ciclo - Patrimonio: $patrimonioApos EUR (cash: $($estado.saldo) EUR)`n`n" + `
         "Pensamento:`n$raciocinioTelegram`n`n" + `
