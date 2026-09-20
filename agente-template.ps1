@@ -232,6 +232,8 @@ $($contexto.mercado | ForEach-Object { "- $($_.par): `$$($_.preco) (mudanca 24h:
 
 Ninguem te vai dizer o que fazer nem como fazer. Pensa livremente sobre a tua situacao e decide tu mesmo o que fazer a seguir - podes abrir uma posicao nova, reforcar ou vender uma que ja tens, ou nao fazer nada agora.
 
+(Escreve os teus pensamentos em portugues - isto e so para eu conseguir acompanhar o que pensas, nao influencia em nada a tua decisao.)
+
 No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos que nao se aplicarem, e 0 se nao quiseres criar nada):
 
 {"acao": "...", "par": "...", "montante": ..., "stopLoss": ..., "alvo": ..., "criarAgentes": 0}
