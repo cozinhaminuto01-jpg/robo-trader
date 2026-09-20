@@ -502,15 +502,16 @@ function Classifica-Acao {
     if ([string]::IsNullOrWhiteSpace($acao)) { return "hold" }
     $a = $acao.ToLower()
 
-    if ($a -match "vend|sair|fechar") { return "venda" }
-    # "mant" cobre manter/mantenho/mantendo/mantenha e tambem "mantener" (espanhol) -
-    # ela por vezes desvia para espanhol ou ingles a meio da resposta em portugues
-    # "mant" cobre manter/mantenho/mantendo/mantenha/mantener (espanhol); "maintain" (ingles)
-    # precisa de ser listado a parte, porque a grafia inglesa tem um "i" a meio e nao
-    # contem "mant" seguido (m-a-i-n-t...) - foi o que causou uma compra indevida quando
-    # ela respondeu "maintain" em vez de "manter"
-    if ($a -match "hold|keep|mant|maintain|aguardar|esperar|nada") { return "hold" }
-    return "compra"
+    # Ela desvia frequentemente de lingua a meio da resposta (portugues, espanhol, ingles),
+    # e usa muitas palavras diferentes para dizer "nao fazer nada" (manter, mantener,
+    # maintain, observe, watch, aguardar, ...) - impossivel cobrir todos os sinonimos
+    # possiveis com uma lista. Por isso o DEFAULT e "hold" (seguro, nao gasta dinheiro),
+    # e so classificamos como compra/venda quando reconhecemos explicitamente essa
+    # intencao. Isto evita que uma palavra nao reconhecida (como aconteceu com "mantener"
+    # e "maintain") seja interpretada por omissao como uma ordem de compra real.
+    if ($a -match "vend|sair|fechar|close|sell") { return "venda" }
+    if ($a -match "compra|comprar|buy|abrir|refor|reinforce|aumentar|adicionar|entrar|invest|^open$|purchase|acquire|^long$") { return "compra" }
+    return "hold"
 }
 
 # Ela normalmente pensa em precos absolutos para o stop loss/alvo (ex: "vender a 1.05
