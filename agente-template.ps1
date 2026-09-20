@@ -160,18 +160,27 @@ function Load-Estado {
     if (Test-Path ".\estado-$AgenteID.json") {
         $obj = Get-Content ".\estado-$AgenteID.json" -Encoding UTF8 | ConvertFrom-Json
         # FIX: Ensure numeric fields are actually decimals/ints, not PSObjects
+        #
+        # FIX: a virgula unaria (,@(...)) e essencial aqui - sem ela, um campo com
+        # exatamente 1 elemento guardado no ultimo Save-Estado (ex: mesmo depois de um
+        # unico ciclo) faz o "if{} else{}" usado como valor colapsar o array de volta a
+        # um objeto escalar (o mesmo colapso de array de 1 elemento do PowerShell que ja
+        # nos mordeu noutros sitios do codigo). Sem a virgula, a proxima linha que fizer
+        # "$estado.X += novoItem" rebenta com "nao contem um metodo denominado
+        # 'op_Addition'" - foi exatamente isto que aconteceu ao reiniciar logo a seguir
+        # ao primeiro ciclo alguma vez gravado (ciclosHistorico com so 1 entrada).
         return @{
             id = if ($obj.id) { [string]$obj.id } else { $AgenteID }
             saldo = if ($obj.saldo) { [decimal]$obj.saldo } else { [decimal]$SaldoInicial }
             saldoInicial = if ($obj.saldoInicial) { [decimal]$obj.saldoInicial } else { [decimal]$SaldoInicial }
-            posicoes = if ($obj.posicoes) { @($obj.posicoes) } else { @() }
-            historico = if ($obj.historico) { @($obj.historico) } else { @() }
-            trades = if ($obj.trades) { @($obj.trades) } else { @() }
-            ciclosHistorico = if ($obj.ciclosHistorico) { @($obj.ciclosHistorico) } else { @() }
+            posicoes = if ($obj.posicoes) { ,@($obj.posicoes) } else { @() }
+            historico = if ($obj.historico) { ,@($obj.historico) } else { @() }
+            trades = if ($obj.trades) { ,@($obj.trades) } else { @() }
+            ciclosHistorico = if ($obj.ciclosHistorico) { ,@($obj.ciclosHistorico) } else { @() }
             winRate = if ($obj.winRate) { [decimal]$obj.winRate } else { 0 }
             ultimaTradaEm = if ($obj.ultimaTradaEm) { $obj.ultimaTradaEm } else { $null }
             ultimaPesquisa = if ($obj.ultimaPesquisa) { $obj.ultimaPesquisa } else { $null }
-            precoHistorico = if ($obj.precoHistorico) { @($obj.precoHistorico) } else { @() }
+            precoHistorico = if ($obj.precoHistorico) { ,@($obj.precoHistorico) } else { @() }
         }
     }
     return $null
