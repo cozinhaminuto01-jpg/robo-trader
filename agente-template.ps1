@@ -39,6 +39,7 @@ $estado = @{
     ciclosHistorico = @()
     winRate = 0
     ultimaTradaEm = $null
+    ultimaPesquisa = $null
 }
 
 # Ficheiro de log pessoal
@@ -161,9 +162,57 @@ function Load-Estado {
             ciclosHistorico = if ($obj.ciclosHistorico) { @($obj.ciclosHistorico) } else { @() }
             winRate = if ($obj.winRate) { [decimal]$obj.winRate } else { 0 }
             ultimaTradaEm = if ($obj.ultimaTradaEm) { $obj.ultimaTradaEm } else { $null }
+            ultimaPesquisa = if ($obj.ultimaPesquisa) { $obj.ultimaPesquisa } else { $null }
         }
     }
     return $null
+}
+
+# Limpa uma string com marcacao HTML (tags, entidades como &amp;) para texto simples -
+# usado para converter os resultados de pesquisa na internet num texto legivel no prompt.
+function Limpa-HtmlTexto {
+    param([string]$texto)
+    $t = $texto -replace '<[^>]+>', ''
+    $t = [System.Net.WebUtility]::HtmlDecode($t)
+    return $t.Trim()
+}
+
+# Pesquisa na internet (DuckDuckGo, sem chave de API) quando ela propria pede - para
+# obter informacao que nao esta disponivel so com os precos da Binance (noticias,
+# eventos, contexto). Nao corre sozinho: so quando ela escreve algo no campo
+# "pesquisar" da sua propria decisao. Falha em silencio (aviso no log, sem rebentar
+# o ciclo) se a rede estiver em baixo ou a pagina mudar de estrutura.
+function Pesquisa-Internet {
+    param([string]$query)
+
+    if ([string]::IsNullOrWhiteSpace($query)) { return $null }
+
+    try {
+        $url = "https://html.duckduckgo.com/html/?q=" + [System.Uri]::EscapeDataString($query)
+        $headers = @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
+        $resposta = Invoke-WebRequest -Uri $url -Headers $headers -UseBasicParsing -TimeoutSec 15
+        $html = $resposta.Content
+
+        $titulos = [System.Text.RegularExpressions.Regex]::Matches($html, '<a[^>]*class="result__a"[^>]*>([\s\S]*?)</a>')
+        $snippets = [System.Text.RegularExpressions.Regex]::Matches($html, '<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)</a>')
+
+        $resultados = @()
+        for ($i = 0; $i -lt [Math]::Min(3, $titulos.Count); $i++) {
+            $titulo = Limpa-HtmlTexto $titulos[$i].Groups[1].Value
+            $snippet = if ($i -lt $snippets.Count) { Limpa-HtmlTexto $snippets[$i].Groups[1].Value } else { "" }
+            if ($titulo) { $resultados += "- $($titulo): $snippet" }
+        }
+
+        if ($resultados.Count -eq 0) {
+            Log "AVISO: Pesquisa na internet por '$query' nao encontrou resultados (ou a pagina mudou de estrutura)." "AVISO"
+            return $null
+        }
+
+        return ($resultados -join "`n")
+    } catch {
+        Log "AVISO: Falha ao pesquisar na internet por '$query': $_" "AVISO"
+        return $null
+    }
 }
 
 # ============================================================================
@@ -488,6 +537,12 @@ function Chama-IA {
 
     $missaoTexto = if (-not [string]::IsNullOrWhiteSpace($MissaoAtribuida)) { "`nA conta que te criou deu-te esta missao/foco: `"$MissaoAtribuida`" - tens liberdade total sobre como a cumpres, isto e so orientacao, nao uma regra obrigatoria." } else { "" }
 
+    $pesquisaTexto = if ($contexto.ultimaPesquisa -and $contexto.ultimaPesquisa.resultados) {
+        "`nPediste para pesquisar na internet por `"$($contexto.ultimaPesquisa.query)`" e isto foi o que encontraste:`n$($contexto.ultimaPesquisa.resultados)`n"
+    } else {
+        ""
+    }
+
     $posicoesTexto = if ($contexto.posicoes -and $contexto.posicoes.Count -gt 0) {
         ($contexto.posicoes | ForEach-Object {
             $pct = if ($_.precoEntrada -gt 0) { [Math]::Round((($_.precoAtual - $_.precoEntrada) / $_.precoEntrada) * 100, 2) } else { 0 }
@@ -508,7 +563,7 @@ $posicoesTexto
 
 O que ja pensaste sobre isto em conversas anteriores:
 $memoria
-
+$pesquisaTexto
 Informacao disponivel na tua conta Binance neste momento:
 $($contexto.mercado | ForEach-Object { "- $($_.par): `$$($_.preco) (mudanca 24h: $($_.mudanca24h)%)$(if ($null -ne $_.volume) { " volume: $($_.volume)" })" } | Out-String)
 
@@ -516,9 +571,9 @@ Ninguem te vai dizer o que fazer nem como fazer. Pensa livremente sobre a tua si
 
 (Escreve os teus pensamentos em portugues - isto e so para eu conseguir acompanhar o que pensas, nao influencia em nada a tua decisao.)
 
-No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos que nao se aplicarem, e 0 se nao quiseres criar nada). O "montante" e sempre o valor em USD que queres investir (nao a quantidade de moeda) - por exemplo, para comprar 20 USD de ETH e "montante": 20, seja qual for o preco do ETH. Se pedires "criarAgentes", o novo agente fica na mesma empresa (o objetivo de $ObjetivoPatrimonio USD passa a contar a soma dele com a tua) mas ele pensa e decide por si mesmo - usa "missaoNovoAgente" para lhe dares uma missao/foco (ex: "foca-te so em ADA e XRP"), ou deixa null para lhe dares liberdade total:
+No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos que nao se aplicarem, e 0 se nao quiseres criar nada). O "montante" e sempre o valor em USD que queres investir (nao a quantidade de moeda) - por exemplo, para comprar 20 USD de ETH e "montante": 20, seja qual for o preco do ETH. Se pedires "criarAgentes", o novo agente fica na mesma empresa (o objetivo de $ObjetivoPatrimonio USD passa a contar a soma dele com a tua) mas ele pensa e decide por si mesmo - usa "missaoNovoAgente" para lhe dares uma missao/foco (ex: "foca-te so em ADA e XRP"), ou deixa null para lhe dares liberdade total. Se quiseres saber algo que nao esta nesta informacao (noticias, o que aconteceu com uma moeda, contexto do mercado), usa "pesquisar" para escreveres o que queres pesquisar na internet - o resultado aparece-te na proxima vez que pensares nisto:
 
-{"acao": "...", "par": "...", "montante": ..., "stopLoss": ..., "alvo": ..., "criarAgentes": 0, "missaoNovoAgente": null}
+{"acao": "...", "par": "...", "montante": ..., "stopLoss": ..., "alvo": ..., "criarAgentes": 0, "missaoNovoAgente": null, "pesquisar": null}
 "@
 
     try {
@@ -609,6 +664,7 @@ No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos
                     $confianca = if ($jsonText -match '"?confianca"?\s*:[\s"]*(\d+\.?\d*)') { [decimal]$matches[1] } else { 0.5 }
                     $criarAgentes = if ($jsonText -match '"?criarAgentes"?\s*:[\s"]*(\d+)') { [int]$matches[1] } else { 0 }
                     $missaoNovoAgente = if ($jsonText -match '"?missaoNovoAgente"?\s*:[\s"]*"([^"]*)"' -and $matches[1] -ne 'null') { $matches[1] } else { $null }
+                    $pesquisar = if ($jsonText -match '"?pesquisar"?\s*:[\s"]*"([^"]*)"' -and $matches[1] -ne 'null') { $matches[1] } else { $null }
 
                     # Guarda o texto de raciocinio livre para servir de memoria nos proximos ciclos.
                     # Ela nem sempre coloca a explicacao antes do JSON - as vezes decide primeiro e
@@ -628,6 +684,7 @@ No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos
                         raciocinio = $raciocinio
                         criarAgentes = $criarAgentes
                         missaoNovoAgente = $missaoNovoAgente
+                        pesquisar = $pesquisar
                     }
 
                     Log "IA: Acao=$($deciso.acao), Par=$($deciso.par), Confianca=$($deciso.confianca), CriarAgentes=$($deciso.criarAgentes)" "IA"
@@ -1165,6 +1222,7 @@ function Executa-Ciclo {
         numAgentes = $numAgentes
         historico = $estado.historico
         posicoes = $posicoesContexto
+        ultimaPesquisa = $estado.ultimaPesquisa
     }
     $deciso = Chama-IA -contexto $contexto
 
@@ -1177,6 +1235,21 @@ function Executa-Ciclo {
     }
 
     Log "Decisao: $($deciso | ConvertTo-Json -Compress)" "IA"
+
+    # Pesquisa na internet so quando ela propria pede - o resultado fica guardado para
+    # lhe aparecer no proximo ciclo (o Ollama nao suporta pesquisar a meio de uma resposta)
+    if ($deciso.pesquisar) {
+        Log "Ela pediu para pesquisar na internet: $($deciso.pesquisar)" "INFO"
+        $resultadoPesquisa = Pesquisa-Internet -query $deciso.pesquisar
+        if ($resultadoPesquisa) {
+            $estado.ultimaPesquisa = @{
+                query = $deciso.pesquisar
+                resultados = $resultadoPesquisa
+                timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
+            }
+            Log "Resultado da pesquisa: $resultadoPesquisa" "INFO"
+        }
+    }
 
     $novasAgentes = if ($deciso.criarAgentes) { $deciso.criarAgentes } else { 0 }
     if ($novasAgentes -gt 0) {
