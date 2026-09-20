@@ -605,7 +605,10 @@ function Resume-Historico {
 
     $recentes = @($ciclosHistorico | Select-Object -Last 20)
 
-    $porAcao = $recentes | Group-Object -Property acao | Sort-Object Count -Descending
+    # Agrupa por um nome calculado (nao a propriedade acao diretamente) para nunca
+    # mostrar um grupo com nome em branco (": Nx") quando um ciclo antigo nao tinha
+    # a acao registada - mesmo sendo so cosmetico, confundia a leitura do resumo
+    $porAcao = $recentes | Group-Object -Property { if ([string]::IsNullOrWhiteSpace($_.acao)) { "(sem acao)" } else { $_.acao } } | Sort-Object Count -Descending
     $resumoAcoes = ($porAcao | ForEach-Object { "$($_.Name): $($_.Count)x" }) -join ", "
 
     $fechados = @($recentes | Where-Object { $null -ne $_.resultado })
