@@ -166,17 +166,222 @@ function Load-Estado {
 }
 
 # ============================================================================
-# BINANCE API (Testnet/Real)
+# BINANCE API (Testnet real - testnet.binance.vision)
 # ============================================================================
+# Liga-se a conta de testes da propria Binance (dinheiro sempre falso, nunca a
+# conta real) - precos de mercado, saldo e execucao de ordens passam a vir de
+# la, em vez de serem simulados localmente. So se ativa quando ha chaves da
+# testnet configuradas; sem elas, mantem-se o mercado simulado (Avanca-Mercado)
+# para nao partir instalacoes que ainda nao tenham chaves.
 
-function Get-BalanceBinance {
-    if ($config.ambiente -eq "testnet") {
-        return @{
-            USDT = $estado.saldo
-            BTC = 0
-            ETH = 0
-            SOL = 0
+$BINANCE_TESTNET_URL = "https://testnet.binance.vision"
+
+# Pares que o sistema conhece e o simbolo correspondente na Binance (sem a barra)
+$PARES_BINANCE = [ordered]@{
+    "BTC/USDT" = "BTCUSDT"
+    "ETH/USDT" = "ETHUSDT"
+    "SOL/USDT" = "SOLUSDT"
+    "XRP/USDT" = "XRPUSDT"
+    "ADA/USDT" = "ADAUSDT"
+}
+
+$script:FiltrosBinanceCache = @{}
+
+# O ficheiro de configuracao do utilizador ja usava binance_testnet_key/secret antes
+# de este codigo existir; aceita tambem os nomes binance_api_key_testnet/secret_testnet
+# usados no template do repositorio, para funcionar com qualquer um dos dois sem
+# obrigar a editar o ficheiro outra vez.
+function Get-BinanceKey { if ($config.binance_testnet_key) { return $config.binance_testnet_key }; return $config.binance_api_key_testnet }
+function Get-BinanceSecret { if ($config.binance_testnet_secret) { return $config.binance_testnet_secret }; return $config.binance_api_secret_testnet }
+
+function Tem-BinanceConfigurado {
+    $key = Get-BinanceKey
+    $secret = Get-BinanceSecret
+    if (-not $key -or -not $secret) { return $false }
+    if ($key -match "COLOCA_AQUI" -or $secret -match "COLOCA_AQUI") { return $false }
+    return $true
+}
+
+# Converte um valor JSON (sempre texto na API da Binance, ex: "43250.00000000") para
+# decimal SEM depender do locale da maquina. Um cast direto [decimal]$texto usa a
+# cultura atual - numa maquina configurada em portugues (virgula como separador
+# decimal), isto corrompe silenciosamente o numero (ex: "43250.00000000" passava a
+# 43250, perdendo os decimais) em vez de dar erro, o que passaria despercebido.
+function ConvertTo-DecimalInvariante {
+    param($valor)
+    if ($null -eq $valor) { return $null }
+    return [decimal]::Parse([string]$valor, [System.Globalization.NumberStyles]::Any, [System.Globalization.CultureInfo]::InvariantCulture)
+}
+
+# O inverso: converte um decimal para texto para enviar num pedido a Binance, sempre
+# com ponto decimal, nunca com a virgula que o locale portugues usaria por omissao
+# (.ToString() simples dava "0,015" em vez de "0.015", que a API rejeitaria ou
+# interpretaria mal)
+function ConvertFrom-DecimalInvariante {
+    param([decimal]$valor)
+    return $valor.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+}
+
+function Get-BinanceSignature {
+    param([string]$queryString, [string]$secret)
+    $hmac = New-Object System.Security.Cryptography.HMACSHA256
+    $hmac.Key = [Text.Encoding]::UTF8.GetBytes($secret)
+    $hash = $hmac.ComputeHash([Text.Encoding]::UTF8.GetBytes($queryString))
+    return -join ($hash | ForEach-Object { $_.ToString("x2") })
+}
+
+function ConvertTo-BinanceQueryString {
+    param([System.Collections.Specialized.OrderedDictionary]$parametros)
+    return ($parametros.Keys | ForEach-Object {
+        $valor = $parametros[$_]
+        $valorTexto = if ($valor -is [decimal]) { ConvertFrom-DecimalInvariante $valor } else { [string]$valor }
+        "$_=$([uri]::EscapeDataString($valorTexto))"
+    }) -join "&"
+}
+
+function Invoke-BinancePublico {
+    param([string]$caminho, [string]$queryString = "")
+    $uri = "$BINANCE_TESTNET_URL$caminho"
+    if ($queryString) { $uri += "?$queryString" }
+    return Invoke-RestMethod -Uri $uri -Method Get -TimeoutSec 15
+}
+
+function Invoke-BinanceAssinado {
+    param([string]$caminho, [string]$metodo = "GET", [System.Collections.Specialized.OrderedDictionary]$parametros = [ordered]@{})
+
+    $params = [ordered]@{}
+    foreach ($k in $parametros.Keys) { $params[$k] = $parametros[$k] }
+    $params["recvWindow"] = 10000
+    $params["timestamp"] = [long]([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())
+
+    $queryString = ConvertTo-BinanceQueryString $params
+    $assinatura = Get-BinanceSignature -queryString $queryString -secret (Get-BinanceSecret)
+    $uri = "$BINANCE_TESTNET_URL$caminho`?$queryString&signature=$assinatura"
+    $headers = @{ "X-MBX-APIKEY" = (Get-BinanceKey) }
+    return Invoke-RestMethod -Uri $uri -Method $metodo -Headers $headers -TimeoutSec 15
+}
+
+# Preco, variacao 24h e volume reais de todos os pares seguidos, numa unica chamada -
+# substitui o passeio aleatorio local (Avanca-Mercado) quando ha chaves configuradas.
+function Get-BinanceDadosMercado {
+    $simbolos = @($PARES_BINANCE.Values)
+    $simboloParaPar = @{}
+    foreach ($par in $PARES_BINANCE.Keys) { $simboloParaPar[$PARES_BINANCE[$par]] = $par }
+
+    try {
+        $simbolosJson = ($simbolos | ConvertTo-Json -Compress)
+        $queryString = "symbols=" + [uri]::EscapeDataString($simbolosJson)
+        $tickers = Invoke-BinancePublico -caminho "/api/v3/ticker/24hr" -queryString $queryString
+    } catch {
+        Log "AVISO: Falha ao obter dados de mercado reais da Binance Testnet: $_" "AVISO"
+        return $null
+    }
+
+    $precos = @{}
+    $variacoes = @{}
+    $volumes = @{}
+    foreach ($t in $tickers) {
+        $par = $simboloParaPar[$t.symbol]
+        if (-not $par) { continue }
+        $precos[$par] = ConvertTo-DecimalInvariante $t.lastPrice
+        $variacoes[$par] = ConvertTo-DecimalInvariante $t.priceChangePercent
+        $volumes[$par] = ConvertTo-DecimalInvariante $t.quoteVolume
+    }
+    if ($precos.Count -eq 0) { return $null }
+    return @{ precos = $precos; variacoes = $variacoes; volumes = $volumes }
+}
+
+# Saldo real (USDT livre) da conta testnet - substitui o saldo so guardado localmente
+function Get-BinanceSaldoReal {
+    try {
+        $conta = Invoke-BinanceAssinado -caminho "/api/v3/account" -metodo "GET"
+        $usdt = $conta.balances | Where-Object { $_.asset -eq "USDT" } | Select-Object -First 1
+        if ($usdt) { return ConvertTo-DecimalInvariante $usdt.free }
+        return $null
+    } catch {
+        Log "AVISO: Falha ao obter saldo real da Binance Testnet: $_" "AVISO"
+        return $null
+    }
+}
+
+# Regras de lote/valor minimo de cada simbolo (obrigatorias para uma ordem ser aceite
+# pela Binance) - cada uma so e pedida uma vez por simbolo e fica em cache
+function Get-BinanceFiltros {
+    param([string]$simbolo)
+
+    if ($script:FiltrosBinanceCache.ContainsKey($simbolo)) { return $script:FiltrosBinanceCache[$simbolo] }
+
+    $filtrosPorOmissao = @{ stepSize = [decimal]0.00000001; minQty = [decimal]0; minNotional = [decimal]0 }
+    try {
+        $info = Invoke-BinancePublico -caminho "/api/v3/exchangeInfo" -queryString "symbol=$simbolo"
+        $simboloInfo = $info.symbols | Select-Object -First 1
+        if (-not $simboloInfo) { return $filtrosPorOmissao }
+
+        $lotSize = $simboloInfo.filters | Where-Object { $_.filterType -eq "LOT_SIZE" } | Select-Object -First 1
+        $notional = $simboloInfo.filters | Where-Object { $_.filterType -eq "MIN_NOTIONAL" -or $_.filterType -eq "NOTIONAL" } | Select-Object -First 1
+
+        $minNotionalValor = [decimal]0
+        if ($notional) {
+            if ($notional.minNotional) { $minNotionalValor = ConvertTo-DecimalInvariante $notional.minNotional }
+            elseif ($notional.notional) { $minNotionalValor = ConvertTo-DecimalInvariante $notional.notional }
         }
+
+        $filtros = @{
+            stepSize = if ($lotSize) { ConvertTo-DecimalInvariante $lotSize.stepSize } else { [decimal]0.00000001 }
+            minQty = if ($lotSize) { ConvertTo-DecimalInvariante $lotSize.minQty } else { [decimal]0 }
+            minNotional = $minNotionalValor
+        }
+        $script:FiltrosBinanceCache[$simbolo] = $filtros
+        return $filtros
+    } catch {
+        Log "AVISO: Falha ao obter filtros de $simbolo, a usar valores por omissao: $_" "AVISO"
+        return $filtrosPorOmissao
+    }
+}
+
+# Arredonda para baixo ate ao multiplo de stepSize mais proximo - a Binance rejeita
+# quantidades com mais casas decimais do que o lote minimo do simbolo permite
+function Arredonda-QuantidadeBinance {
+    param([decimal]$quantidade, [decimal]$stepSize)
+    if ($stepSize -le 0) { return $quantidade }
+    $passos = [Math]::Floor($quantidade / $stepSize)
+    return $passos * $stepSize
+}
+
+# Coloca uma ordem de mercado real (compra ou venda) na Binance Testnet e devolve o
+# que foi mesmo executado - nunca assume que o preco pedido foi o preco de execucao,
+# tal como aconteceria numa exchange real
+function Coloca-OrdemBinance {
+    param([string]$simbolo, [string]$lado, [decimal]$quantidade)
+
+    try {
+        $parametros = [ordered]@{
+            symbol = $simbolo
+            side = $lado
+            type = "MARKET"
+            quantity = $quantidade
+        }
+        $ordem = Invoke-BinanceAssinado -caminho "/api/v3/order" -metodo "POST" -parametros $parametros
+
+        $qtyExecutada = ConvertTo-DecimalInvariante $ordem.executedQty
+        $valorExecutado = ConvertTo-DecimalInvariante $ordem.cummulativeQuoteQty
+        $precoMedio = if ($qtyExecutada -gt 0) { $valorExecutado / $qtyExecutada } else { [decimal]0 }
+
+        if ($qtyExecutada -le 0) {
+            Log "AVISO: Ordem $lado $simbolo aceite mas nao executou nenhuma quantidade (estado: $($ordem.status))" "AVISO"
+            return @{ sucesso = $false }
+        }
+
+        return @{
+            sucesso = $true
+            quantidade = $qtyExecutada
+            valorTotal = $valorExecutado
+            precoMedio = $precoMedio
+            ordemId = $ordem.orderId
+        }
+    } catch {
+        Log "AVISO: Ordem $lado $simbolo de $quantidade falhou na Binance Testnet: $_" "AVISO"
+        return @{ sucesso = $false }
     }
 }
 
@@ -231,7 +436,7 @@ function Avanca-Mercado {
 }
 
 function Get-MercadoData {
-    param([hashtable]$precos, [hashtable]$variacoes)
+    param([hashtable]$precos, [hashtable]$variacoes, [hashtable]$volumes = $null)
 
     $pares = @()
     foreach ($par in $precos.Keys) {
@@ -239,7 +444,10 @@ function Get-MercadoData {
             par = $par
             preco = [Math]::Round($precos[$par], 4)
             mudanca24h = $variacoes[$par]
-            volume = Get-Random -Minimum 100000000 -Maximum 2000000000
+            # Com Binance Testnet real ha volume real de 24h; sem ela (mercado simulado),
+            # nao existe volume nenhum para mostrar - inventar um numero apenas
+            # preencheria a conversa com informacao falsa sem qualquer utilidade
+            volume = if ($volumes -and $volumes.ContainsKey($par)) { [Math]::Round($volumes[$par], 2) } else { $null }
         }
     }
     return $pares | Get-Random -Count (Get-Random -Minimum 2 -Maximum ($pares.Count + 1))
@@ -282,7 +490,7 @@ O que ja pensaste sobre isto em conversas anteriores:
 $memoria
 
 Informacao disponivel na tua conta Binance neste momento:
-$($contexto.mercado | ForEach-Object { "- $($_.par): `$$($_.preco) (mudanca 24h: $($_.mudanca24h)%) volume: $($_.volume)" } | Out-String)
+$($contexto.mercado | ForEach-Object { "- $($_.par): `$$($_.preco) (mudanca 24h: $($_.mudanca24h)%)$(if ($null -ne $_.volume) { " volume: $($_.volume)" })" } | Out-String)
 
 Ninguem te vai dizer o que fazer nem como fazer. Pensa livremente sobre a tua situacao e decide tu mesmo o que fazer a seguir - podes abrir uma posicao nova, reforcar ou vender uma que ja tens, ou nao fazer nada agora.
 
@@ -644,7 +852,10 @@ function Fecha-Posicao {
 function Verifica-StopLossAlvo {
     param([array]$posicoes, [hashtable]$precosAtuais)
 
-    $fechadas = @()
+    # So DETETA quais posicoes atingiram o stop loss/alvo - nao as fecha aqui. Fechar
+    # de verdade pode envolver colocar uma ordem real na Binance, que pode falhar; quem
+    # chama esta funcao e que decide como fechar cada uma e o que fazer se falhar.
+    $aFechar = @()
     $posicoesRestantes = @()
 
     foreach ($p in $posicoes) {
@@ -661,20 +872,13 @@ function Verifica-StopLossAlvo {
         }
 
         if ($motivo) {
-            $valorAtual = $p.quantidade * $precoAtual
-            $fechadas += @{
-                par = $p.par
-                montanteInvestido = $p.montanteInvestido
-                valorAtual = $valorAtual
-                ganho = $valorAtual - $p.montanteInvestido
-                motivo = $motivo
-            }
+            $aFechar += @{ posicao = $p; precoAtual = $precoAtual; motivo = $motivo }
         } else {
             $posicoesRestantes += $p
         }
     }
 
-    return @{ posicoes = $posicoesRestantes; fechadas = $fechadas }
+    return @{ posicoesRestantes = $posicoesRestantes; aFechar = $aFechar }
 }
 
 # Patrimonio total = dinheiro disponivel + valor atual de tudo o que tem investido.
@@ -714,10 +918,42 @@ function Executa-Ciclo {
 
     Log "===== Ciclo $ciclo Iniciado =====" "CICLO"
 
-    # O mercado evolui uma vez por ciclo, partilhado entre todos os agentes
-    $mercadoAvancado = Avanca-Mercado
-    $precosAtuais = $mercadoAvancado.precos
-    $variacoes = $mercadoAvancado.variacoes
+    # Com chaves da Binance Testnet configuradas, os precos, o saldo e as ordens sao
+    # reais (dinheiro sempre falso, conta de testes da propria Binance) - sem chaves,
+    # mantem-se o mercado simulado localmente como ate aqui
+    $usaBinanceReal = Tem-BinanceConfigurado
+    if ($usaBinanceReal) {
+        $dadosBinance = Get-BinanceDadosMercado
+        if ($dadosBinance) {
+            $precosAtuais = $dadosBinance.precos
+            $variacoes = $dadosBinance.variacoes
+            $volumesReais = $dadosBinance.volumes
+        } else {
+            Log "AVISO: Sem dados reais da Binance Testnet neste ciclo, a usar mercado simulado como reserva" "AVISO"
+            $mercadoAvancado = Avanca-Mercado
+            $precosAtuais = $mercadoAvancado.precos
+            $variacoes = $mercadoAvancado.variacoes
+            $volumesReais = $null
+            $usaBinanceReal = $false
+        }
+    } else {
+        $mercadoAvancado = Avanca-Mercado
+        $precosAtuais = $mercadoAvancado.precos
+        $variacoes = $mercadoAvancado.variacoes
+        $volumesReais = $null
+    }
+
+    if ($usaBinanceReal) {
+        $saldoReal = Get-BinanceSaldoReal
+        if ($null -ne $saldoReal) {
+            if ([Math]::Abs($saldoReal - $estado.saldo) -gt 0.01) {
+                Log "INFO: A sincronizar saldo local ($($estado.saldo) EUR) com o saldo real da Binance Testnet ($saldoReal EUR)" "INFO"
+            }
+            $estado.saldo = $saldoReal
+        } else {
+            Log "AVISO: Nao foi possivel confirmar o saldo real da Binance Testnet, a manter o ultimo valor conhecido ($($estado.saldo) EUR)" "AVISO"
+        }
+    }
 
     # Patrimonio = dinheiro + valor atual de tudo o que tem investido. E isto que
     # decide game over / objetivo atingido, nao so o dinheiro solto em caixa.
@@ -755,26 +991,51 @@ function Executa-Ciclo {
     # Verifica stop loss / alvo automaticos em todas as posicoes abertas, antes dela
     # sequer pensar neste ciclo - tal como uma ordem real dispararia sozinha
     $verificacao = Verifica-StopLossAlvo -posicoes $estado.posicoes -precosAtuais $precosAtuais
-    $estado.posicoes = $verificacao.posicoes
+    $posicoesFinal = @($verificacao.posicoesRestantes)
     $fechosAutomaticos = @()
-    foreach ($f in $verificacao.fechadas) {
-        $estado.saldo += $f.valorAtual
+    foreach ($item in $verificacao.aFechar) {
+        $p = $item.posicao
+        $valorAtual = $null
+
+        if ($usaBinanceReal -and $PARES_BINANCE.Contains($p.par)) {
+            $simbolo = $PARES_BINANCE[$p.par]
+            $filtros = Get-BinanceFiltros -simbolo $simbolo
+            $quantidadeVenda = Arredonda-QuantidadeBinance -quantidade $p.quantidade -stepSize $filtros.stepSize
+            if ($quantidadeVenda -gt 0) {
+                $ordem = Coloca-OrdemBinance -simbolo $simbolo -lado "SELL" -quantidade $quantidadeVenda
+                if ($ordem.sucesso) { $valorAtual = $ordem.valorTotal }
+            }
+            if ($null -eq $valorAtual) {
+                # A ordem real falhou (ou a quantidade era pequena demais para o lote
+                # minimo) - mantem a posicao aberta em vez de a dar como fechada sem
+                # ter mesmo vendido nada, e tenta outra vez no proximo ciclo
+                Log "AVISO: Fecho automatico de $($p.par) ($($item.motivo)) nao conseguiu executar ordem real - posicao mantida aberta, tenta de novo no proximo ciclo" "AVISO"
+                $posicoesFinal += $p
+                continue
+            }
+        } else {
+            $valorAtual = $p.quantidade * $item.precoAtual
+        }
+
+        $ganho = $valorAtual - $p.montanteInvestido
+        $estado.saldo += $valorAtual
         $tradeAuto = @{
             acao = "venda (automatica)"
-            par = $f.par
-            montante = $f.montanteInvestido
-            resultado = if ($f.montanteInvestido -gt 0) { [Math]::Round(($f.ganho / $f.montanteInvestido) * 100, 2) } else { 0 }
-            ganho = $f.ganho
-            estrategia = $f.motivo
-            raciocinio = "Fechado automaticamente: $($f.motivo)"
+            par = $p.par
+            montante = $p.montanteInvestido
+            resultado = if ($p.montanteInvestido -gt 0) { [Math]::Round(($ganho / $p.montanteInvestido) * 100, 2) } else { 0 }
+            ganho = $ganho
+            estrategia = $item.motivo
+            raciocinio = "Fechado automaticamente: $($item.motivo)"
             timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
         }
         $estado.trades += $tradeAuto
         $fechosAutomaticos += $tradeAuto
-        Log "AUTO: Posicao $($f.par) fechada automaticamente - $($f.motivo) - Ganho: $($f.ganho) EUR" "TRADE"
+        Log "AUTO: Posicao $($p.par) fechada automaticamente - $($item.motivo) - Ganho: $ganho EUR" "TRADE"
     }
+    $estado.posicoes = $posicoesFinal
 
-    $dadosMercado = Get-MercadoData -precos $precosAtuais -variacoes $variacoes
+    $dadosMercado = Get-MercadoData -precos $precosAtuais -variacoes $variacoes -volumes $volumesReais
 
     $numAgentes = 0
     if (Test-Path ".\agentes-ativos.json") {
@@ -847,7 +1108,21 @@ function Executa-Ciclo {
                 Log "AVISO: Pediu para investir $montante EUR mas so ha $($estado.saldo) EUR na conta. Uma exchange real limitaria a ordem ao saldo disponivel." "AVISO"
                 $montante = $estado.saldo
             }
-            if ($montante -gt 0) {
+            if ($montante -gt 0 -and $usaBinanceReal -and $PARES_BINANCE.Contains($parResolvido)) {
+                $simbolo = $PARES_BINANCE[$parResolvido]
+                $filtros = Get-BinanceFiltros -simbolo $simbolo
+                $quantidadePedida = Arredonda-QuantidadeBinance -quantidade ($montante / $precoAtualPar) -stepSize $filtros.stepSize
+                if ($quantidadePedida -le 0 -or ($quantidadePedida * $precoAtualPar) -lt $filtros.minNotional) {
+                    Log "AVISO: Montante de $montante EUR e demasiado pequeno para uma ordem valida em $parResolvido (minimo da Binance: ~$($filtros.minNotional) USD). Sem trade." "AVISO"
+                } else {
+                    $ordem = Coloca-OrdemBinance -simbolo $simbolo -lado "BUY" -quantidade $quantidadePedida
+                    if ($ordem.sucesso) {
+                        $estado.posicoes = Abre-OuAdiciona-Posicao -posicoes $estado.posicoes -par $parResolvido -montante $ordem.valorTotal -precoAtual $ordem.precoMedio -stopLoss $deciso.stopLoss -alvo $deciso.alvo
+                        $estado.saldo -= $ordem.valorTotal
+                        Log "POSICAO (Binance Testnet real): Investidos $($ordem.valorTotal) EUR em $parResolvido a `$$($ordem.precoMedio) (ordem #$($ordem.ordemId))" "TRADE"
+                    }
+                }
+            } elseif ($montante -gt 0) {
                 $estado.posicoes = Abre-OuAdiciona-Posicao -posicoes $estado.posicoes -par $parResolvido -montante $montante -precoAtual $precoAtualPar -stopLoss $deciso.stopLoss -alvo $deciso.alvo
                 $estado.saldo -= $montante
                 Log "POSICAO: Investidos $montante EUR em $parResolvido a `$$precoAtualPar" "TRADE"
@@ -858,8 +1133,34 @@ function Executa-Ciclo {
     } elseif ($tipoAcao -eq "venda") {
         $parResolvido = Resolve-Par -par $deciso.par -precosAtuais $precosAtuais
         $precoAtualPar = if ($parResolvido) { $precosAtuais[$parResolvido] } else { $null }
+        $posicaoExistente = if ($parResolvido) { $estado.posicoes | Where-Object { $_.par -eq $parResolvido } | Select-Object -First 1 } else { $null }
         if (-not $precoAtualPar) {
             Log "AVISO: Par '$($deciso.par)' desconhecido no mercado. Sem trade." "AVISO"
+        } elseif ($usaBinanceReal -and $posicaoExistente -and $PARES_BINANCE.Contains($parResolvido)) {
+            $simbolo = $PARES_BINANCE[$parResolvido]
+            $filtros = Get-BinanceFiltros -simbolo $simbolo
+            $quantidadeVenda = Arredonda-QuantidadeBinance -quantidade $posicaoExistente.quantidade -stepSize $filtros.stepSize
+            if ($quantidadeVenda -le 0) {
+                Log "AVISO: Quantidade de $parResolvido demasiado pequena para uma ordem de venda valida na Binance. Sem trade." "AVISO"
+            } else {
+                $ordem = Coloca-OrdemBinance -simbolo $simbolo -lado "SELL" -quantidade $quantidadeVenda
+                if ($ordem.sucesso) {
+                    $ganho = $ordem.valorTotal - $posicaoExistente.montanteInvestido
+                    $estado.posicoes = @($estado.posicoes | Where-Object { $_.par -ne $parResolvido })
+                    $estado.saldo += $ordem.valorTotal
+                    $trade = @{
+                        acao = "venda"
+                        par = $parResolvido
+                        montante = $posicaoExistente.montanteInvestido
+                        resultado = if ($posicaoExistente.montanteInvestido -gt 0) { [Math]::Round(($ganho / $posicaoExistente.montanteInvestido) * 100, 2) } else { 0 }
+                        ganho = $ganho
+                        estrategia = $deciso.estrategia
+                        raciocinio = $deciso.raciocinio
+                        timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
+                    }
+                    Log "TRADE (Binance Testnet real): Vendeu $parResolvido | Recebido: $($ordem.valorTotal) EUR | Ganho: $ganho EUR (ordem #$($ordem.ordemId))" "TRADE"
+                }
+            }
         } else {
             $fecho = Fecha-Posicao -posicoes $estado.posicoes -par $parResolvido -precoAtual $precoAtualPar
             if ($fecho.resultado) {
