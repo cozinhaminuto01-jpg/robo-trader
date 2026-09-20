@@ -808,7 +808,12 @@ function Sincroniza-PatrimonioEmpresa {
 
     $entradaPropria = $agentes | Where-Object { $_.id -eq $AgenteID } | Select-Object -First 1
     if ($entradaPropria) {
-        $entradaPropria.patrimonioAtual = $patrimonioProprio
+        # Add-Member -Force em vez de atribuicao direta: uma entrada gravada antes desta
+        # funcionalidade existir (ou por qualquer outro codigo mais antigo) pode nao ter
+        # a propriedade "patrimonioAtual" - um PSCustomObject vindo de ConvertFrom-Json
+        # rebenta com "propriedade nao encontrada" ao tentar atribuir a uma propriedade
+        # que ainda nao existe. Add-Member funciona nos dois casos (existe ou nao).
+        $entradaPropria | Add-Member -NotePropertyName "patrimonioAtual" -NotePropertyValue $patrimonioProprio -Force
     } else {
         $novaEntrada = @{
             id = $AgenteID
