@@ -766,17 +766,29 @@ No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos
                     # escrever null quando um campo nao se aplica, mas isso e a PALAVRA "null",
                     # que a regex de resto capturaria como se fosse um valor real (ex: um par
                     # chamado "NULL"), quando na verdade significa ausencia de valor
+                    #
+                    # FIX: para campos de texto livre (pesquisar, missaoNovoAgente, estrategia),
+                    # a quebra de linha do terminal a meio do valor nao só duplica a aspa como
+                    # descrito acima - quando a quebra cai a meio do PROPRIO VALOR (nao logo a
+                    # seguir aos dois pontos), o padrao antigo ([^"]*)" parava na primeira aspa
+                    # falsa e devolvia so o fragmento truncado antes da quebra (ex: "pesquisar":
+                    # "Ri\n"Ripple (XRP)"} extraia apenas "Ri", perdendo "Ripple (XRP)" que vinha
+                    # a seguir a aspa falsa). Isto tornava toda a pesquisa na internet inutil -
+                    # praticamente todos os ciclos pesquisavam por 1-2 letras em vez do texto
+                    # completo. O grupo (?:[^"\n]*\n"?)* absorve e descarta qualquer fragmento
+                    # truncado seguido de quebra de linha (e da aspa falsa que a acompanha),
+                    # ficando so com o valor completo e real que vem a seguir.
                     $acao = if ($jsonText -match '"?acao"?\s*:[\s"]*([a-zA-Z]+)' -and $matches[1] -ne 'null') { $matches[1].ToLower() } else { "hold" }
                     $par = if ($jsonText -match '"?par"?\s*:[\s"]*([A-Za-z0-9]+(?:\s*/\s*[A-Za-z0-9]+)?)' -and $matches[1] -ne 'null') { ($matches[1] -replace '\s', '').ToUpper() } else { $null }
                     $montante = if ($jsonText -match '"?montante"?\s*:[\s"]*(\d+\.?\d*)') { [decimal]$matches[1] } else { 5.0 }
                     $stopLoss = if ($jsonText -match '"?stopLoss"?\s*:[\s"]*(\d+\.?\d*)') { [decimal]$matches[1] } else { $null }
                     $alvo = if ($jsonText -match '"?alvo"?\s*:[\s"]*(\d+\.?\d*)') { [decimal]$matches[1] } else { $null }
-                    $estrategia = if ($jsonText -match '"?estrategia"?\s*:[\s"]*([^"]*)"') { $matches[1] } else { "Extraida da IA" }
+                    $estrategia = if ($jsonText -match '"?estrategia"?\s*:[\s"]*(?:[^"\n]*\n"?)*([^"\n]*)"') { $matches[1] } else { "Extraida da IA" }
                     $risco = if ($jsonText -match '"?risco"?\s*:[\s"]*([a-zA-Z]+)') { $matches[1].ToLower() } else { "baixo" }
                     $confianca = if ($jsonText -match '"?confianca"?\s*:[\s"]*(\d+\.?\d*)') { [decimal]$matches[1] } else { 0.5 }
                     $criarAgentes = if ($jsonText -match '"?criarAgentes"?\s*:[\s"]*(\d+)') { [int]$matches[1] } else { 0 }
-                    $missaoNovoAgente = if ($jsonText -match '"?missaoNovoAgente"?\s*:[\s"]*"([^"]*)"' -and $matches[1] -ne 'null') { $matches[1] } else { $null }
-                    $pesquisar = if ($jsonText -match '"?pesquisar"?\s*:[\s"]*"([^"]*)"' -and $matches[1] -ne 'null') { $matches[1] } else { $null }
+                    $missaoNovoAgente = if ($jsonText -match '"?missaoNovoAgente"?\s*:[\s"]*(?:[^"\n]*\n"?)*([^"\n]*)"' -and $matches[1] -ne 'null') { $matches[1] } else { $null }
+                    $pesquisar = if ($jsonText -match '"?pesquisar"?\s*:[\s"]*(?:[^"\n]*\n"?)*([^"\n]*)"' -and $matches[1] -ne 'null') { $matches[1] } else { $null }
 
                     # Guarda o texto de raciocinio livre para servir de memoria nos proximos ciclos.
                     # Ela nem sempre coloca a explicacao antes do JSON - as vezes decide primeiro e
