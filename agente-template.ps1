@@ -44,6 +44,14 @@ $config = Get-Content $ConfigPath -Encoding UTF8 | ConvertFrom-Json
 # via "ciclos_aprendizagem" no config; 5 por omissao se nao estiver definido.
 $ciclosAprendizagem = if ($config.ciclos_aprendizagem) { [int]$config.ciclos_aprendizagem } else { 5 }
 
+# Minimo absoluto de capital (USD) para criar um novo agente - por baixo disto nem uma
+# ordem valida na Binance seria possivel, por isso nao vale a pena criar uma conta que
+# nao consegue de todo abrir uma posicao. O capital real atribuido a cada novo agente e
+# metade do saldo disponivel no momento (ver a criacao de agentes em Executa-Ciclo), com
+# este valor como piso - nao um valor fixo, para acompanhar a dificuldade atual (capital
+# inicial dela) em vez de ficar preso ao valor antigo de 20 USD.
+$CAPITAL_MINIMO_NOVO_AGENTE = 5.0
+
 # Estado do agente
 $estado = @{
     id = $AgenteID
@@ -655,6 +663,27 @@ function Resume-Historico {
 
     $recentes = @($ciclosHistorico | Select-Object -Last 20)
 
+    # FIX: um modelo pequeno como o Mistral local nao escreve sempre a mesma palavra
+    # para a mesma intencao - "manter", "mantener" (erro comum, e espanhol) e "mantter"
+    # (erro de escrita) sao todos a mesma decisao de nao mexer na posicao, tal como o
+    # "hold" (a palavra interna de reserva em ingles usada quando a acao nao e
+    # reconhecida de todo). Sem normalizar isto, o resumo que ela relê do seu proprio
+    # historico ("manter: 9x, mantener: 2x, mantter: 1x, hold: 1x") fazia parecer que
+    # tomou 4 decisoes diferentes quando na pratica repetiu sempre a mesma - o que so
+    # lhe dificultava perceber o proprio padrao de comportamento. Isto afeta so este
+    # resumo (o que ela le); o valor original de "acao" continua guardado tal e qual
+    # no estado, para o dashboard/historico completo.
+    $sinonimosManter = @('manter', 'mantener', 'mantter', 'hold')
+    $recentes = $recentes | ForEach-Object {
+        $acaoNormalizada = if ($_.acao -and $sinonimosManter -contains $_.acao.ToLower()) { 'manter' } else { $_.acao }
+        [PSCustomObject]@{
+            acao = $acaoNormalizada
+            resultado = $_.resultado
+            ganho = $_.ganho
+            raciocinio = $_.raciocinio
+        }
+    }
+
     # Agrupa por um nome calculado (nao a propriedade acao diretamente) para nunca
     # mostrar um grupo com nome em branco (": Nx") quando um ciclo antigo nao tinha
     # a acao registada - mesmo sendo so cosmetico, confundia a leitura do resumo
@@ -697,6 +726,19 @@ function Chama-IA {
 
     $agentesInfo = if ($contexto.numAgentes -gt 1) { "Tens tambem $($contexto.numAgentes - 1) outra(s) conta(s)/agente(s) que ja criaste antes." } else { "" }
 
+    # Resumo factual do progresso (so aritmetica sobre numeros que ja existem, nunca uma
+    # sugestao de estrategia) - sem isto, ela so via o preco/tendencia das moedas a cada
+    # ciclo, sem nenhuma nocao explicita de quanto falta para o objetivo ou de quanto
+    # tempo (ciclos) ja passou, o que a levava a raciocinar sobre a moeda em si em vez de
+    # ligar as decisoes ao objetivo real. Isto e informacao, tal como os precos de
+    # mercado que ja lhe mostramos - continua tudo por conta dela decidir o que fazer.
+    $progressoTexto = if ($null -ne $contexto.patrimonioEmpresa) {
+        $faltam = [Math]::Max(0, [Math]::Round($ObjetivoPatrimonio - $contexto.patrimonioEmpresa, 2))
+        "`nResumo factual do progresso: ja levas $($contexto.ciclo) ciclos desde o inicio. Comecaste com $($contexto.saldoInicial) USD (so a tua conta). O teu patrimonio atual e $([Math]::Round($contexto.patrimonioProprio, 2)) USD. O patrimonio somado de toda a empresa e $([Math]::Round($contexto.patrimonioEmpresa, 2)) USD - faltam $faltam USD para o objetivo de $ObjetivoPatrimonio USD."
+    } else {
+        ""
+    }
+
     $missaoTexto = if (-not [string]::IsNullOrWhiteSpace($MissaoAtribuida)) { "`nA conta que te criou deu-te esta missao/foco: `"$MissaoAtribuida`" - tens liberdade total sobre como a cumpres, isto e so orientacao, nao uma regra obrigatoria." } else { "" }
 
     $pesquisaTexto = if ($contexto.ultimaPesquisa -and $contexto.ultimaPesquisa.resultados) {
@@ -718,6 +760,7 @@ function Chama-IA {
 Tens uma conta na Binance. Dinheiro disponivel (cash): $($contexto.saldo) USD.
 O objetivo e da empresa toda: a soma do patrimonio de todas as contas que fazem parte dela (incluindo a tua, e as que tu proprio criares) tem de chegar aos $ObjetivoPatrimonio USD. Quando a empresa lá chegar, todas as contas ganham um descanso.
 Se O TEU patrimonio chegar a 0, e o fim para ti - perdes tudo e nao ha volta atras (as outras contas da empresa, se houver, continuam).
+$progressoTexto
 $agentesInfo$missaoTexto
 
 As tuas posicoes abertas neste momento:
@@ -1450,6 +1493,10 @@ function Executa-Ciclo {
         ciclosHistorico = $estado.ciclosHistorico
         posicoes = $posicoesContexto
         ultimaPesquisa = $estado.ultimaPesquisa
+        ciclo = $ciclo
+        saldoInicial = $estado.saldoInicial
+        patrimonioProprio = $patrimonio
+        patrimonioEmpresa = $patrimonioEmpresa
     }
     $deciso = Chama-IA -contexto $contexto
 
@@ -1483,12 +1530,23 @@ function Executa-Ciclo {
         Log "CEO CRIANDO $novasAgentes NOVOS AGENTES!" "DECISAO"
         for ($i = 1; $i -le $novasAgentes; $i++) {
             $proximoID = $numAgentes + $i
-            if ($estado.saldo -ge 20) {
-                Cria-NovoAgente -numeroAgente $proximoID -capital 20 -missao $deciso.missaoNovoAgente
-                $estado.saldo -= 20
-                Log "Novo agente criado. Saldo restante: $($estado.saldo) EUR" "INFO"
+            # FIX: o minimo (e o capital atribuido) eram fixos em 20 USD, herdados de
+            # quando o capital inicial dela tambem era 20 USD. Desde que o capital
+            # inicial passou a 10 USD (para aumentar a dificuldade), um minimo fixo de
+            # 20 tornava esta funcionalidade estruturalmente impossivel de acionar - ela
+            # nunca teria 20 USD disponiveis a nao ser que duplicasse o proprio capital
+            # primeiro. Passa a ser metade do saldo disponivel dela nesse momento (com
+            # um minimo absoluto de $CAPITAL_MINIMO_NOVO_AGENTE USD, por baixo do qual
+            # nem uma ordem valida na Binance seria possivel) - continua a ser so ela a
+            # decidir SE e QUANDO quer criar um agente, isto so ajusta QUANTO custa
+            # poder fazê-lo, para acompanhar a dificuldade atual.
+            if ($estado.saldo -ge $CAPITAL_MINIMO_NOVO_AGENTE) {
+                $capitalNovoAgente = [Math]::Max($CAPITAL_MINIMO_NOVO_AGENTE, [Math]::Round($estado.saldo / 2, 2))
+                Cria-NovoAgente -numeroAgente $proximoID -capital $capitalNovoAgente -missao $deciso.missaoNovoAgente
+                $estado.saldo -= $capitalNovoAgente
+                Log "Novo agente criado com $capitalNovoAgente USD. Saldo restante: $($estado.saldo) EUR" "INFO"
             } else {
-                Log "AVISO: Quis criar um novo agente mas so ha $($estado.saldo) EUR na conta (minimo: 20 EUR). Sem novo agente." "AVISO"
+                Log "AVISO: Quis criar um novo agente mas so ha $($estado.saldo) EUR na conta (minimo: $CAPITAL_MINIMO_NOVO_AGENTE EUR). Sem novo agente." "AVISO"
             }
         }
     }
