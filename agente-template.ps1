@@ -663,19 +663,28 @@ function Resume-Historico {
 
     $recentes = @($ciclosHistorico | Select-Object -Last 20)
 
-    # FIX: um modelo pequeno como o Mistral local nao escreve sempre a mesma palavra
-    # para a mesma intencao - "manter", "mantener" (erro comum, e espanhol) e "mantter"
-    # (erro de escrita) sao todos a mesma decisao de nao mexer na posicao, tal como o
-    # "hold" (a palavra interna de reserva em ingles usada quando a acao nao e
-    # reconhecida de todo). Sem normalizar isto, o resumo que ela relê do seu proprio
-    # historico ("manter: 9x, mantener: 2x, mantter: 1x, hold: 1x") fazia parecer que
-    # tomou 4 decisoes diferentes quando na pratica repetiu sempre a mesma - o que so
-    # lhe dificultava perceber o proprio padrao de comportamento. Isto afeta so este
-    # resumo (o que ela le); o valor original de "acao" continua guardado tal e qual
-    # no estado, para o dashboard/historico completo.
-    $sinonimosManter = @('manter', 'mantener', 'mantter', 'hold')
+    # FIX: um modelo pequeno como o Mistral local nao escreve sempre a mesma palavra (nem
+    # so uma palavra) para a mesma intencao - "manter", "mantener" (erro comum, espanhol),
+    # "mantter" (erro de escrita), "hold" (a palavra interna de reserva em ingles), ou ate
+    # uma frase inteira tipo "Manter a posicao atual na moeda SOL" (isto passou a poder
+    # acontecer desde que "acao" veio a ser lido diretamente do JSON estrito, sem a antiga
+    # regex que so apanhava uma palavra) sao todos a mesma decisao de nao mexer na posicao.
+    # Sem normalizar isto, o resumo que ela relê do seu proprio historico fazia parecer que
+    # tomou varias decisoes diferentes quando na pratica repetiu sempre a mesma - o que so
+    # lhe dificultava perceber o proprio padrao de comportamento. Reutiliza-se aqui a mesma
+    # Classifica-Acao ja usada para decidir se um trade real e executado (deteta a intencao
+    # por palavra-chave, nao por igualdade exata), para que o resumo fique sempre coerente
+    # com o que o sistema realmente fez com cada decisao - imune a frases inteiras ou a
+    # sinonimos novos que apareçam no futuro. Isto afeta so este resumo (o que ela le); o
+    # valor original de "acao" continua guardado tal e qual no estado, para o
+    # dashboard/historico completo.
     $recentes = $recentes | ForEach-Object {
-        $acaoNormalizada = if ($_.acao -and $sinonimosManter -contains $_.acao.ToLower()) { 'manter' } else { $_.acao }
+        $acaoNormalizada = switch (Classifica-Acao -acao $_.acao) {
+            "compra" { "comprar" }
+            "venda" { "vender" }
+            "ajustar" { "ajustar" }
+            default { "manter" }
+        }
         [PSCustomObject]@{
             acao = $acaoNormalizada
             resultado = $_.resultado
