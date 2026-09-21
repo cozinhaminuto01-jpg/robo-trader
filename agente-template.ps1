@@ -13,6 +13,15 @@ param(
     [string]$MissaoAtribuida = ""
 )
 
+# FIX: guarda se -ObjetivoPatrimonio foi mesmo passado explicitamente nesta chamada
+# (em vez de vir so do valor por omissao 1000 do param acima). Precisamos disto mais
+# a frente para decidir se um reinicio sem a flag deve reverter para 1000 (errado, se
+# ja tinha sido definido um objetivo diferente antes) ou manter o valor guardado no
+# estado da ultima vez - isto tem de ser lido AQUI, antes de mais nada tocar em
+# $ObjetivoPatrimonio, porque $PSBoundParameters so reflete os argumentos originais
+# da linha de comandos.
+$objetivoPatrimonioFoiPassadoExplicitamente = $PSBoundParameters.ContainsKey('ObjetivoPatrimonio')
+
 # FIX ENCODING: O Windows PowerShell 5.1 escreve na consola e em ficheiros usando o
 # codepage local (ANSI) por omissao, nao UTF-8. Como o texto (respostas do Mistral,
 # acentos em portugues) e sempre UTF-8, isto corrompe visualmente tudo o que e escrito
@@ -48,6 +57,7 @@ $estado = @{
     ultimaTradaEm = $null
     ultimaPesquisa = $null
     precoHistorico = @()
+    objetivoPatrimonio = $ObjetivoPatrimonio
 }
 
 # Ficheiro de log pessoal
@@ -181,6 +191,7 @@ function Load-Estado {
             ultimaTradaEm = if ($obj.ultimaTradaEm) { $obj.ultimaTradaEm } else { $null }
             ultimaPesquisa = if ($obj.ultimaPesquisa) { $obj.ultimaPesquisa } else { $null }
             precoHistorico = if ($obj.precoHistorico) { ,@($obj.precoHistorico) } else { @() }
+            objetivoPatrimonio = if ($obj.objetivoPatrimonio) { [decimal]$obj.objetivoPatrimonio } else { [decimal]$ObjetivoPatrimonio }
         }
     }
     return $null
@@ -778,17 +789,26 @@ No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos
                     # completo. O grupo (?:[^"\n]*\n"?)* absorve e descarta qualquer fragmento
                     # truncado seguido de quebra de linha (e da aspa falsa que a acompanha),
                     # ficando so com o valor completo e real que vem a seguir.
+                    #
+                    # FIX (regressao do fix anterior): tem de haver uma aspa OBRIGATORIA logo
+                    # antes do grupo de descarte - sem ela, quando o campo nao tem valor e ela
+                    # escreve a palavra null SEM aspas (ex: "missaoNovoAgente": null), o grupo
+                    # [^"\n]* apanhava esse "null" a passar e continuava ate a proxima aspa que
+                    # encontrasse no JSON (a de um campo completamente diferente mais a frente,
+                    # ex: "pesquisar"), capturando lixo como valor (ex: "null, ") em vez de cair
+                    # no default $null. A aspa obrigatoria garante que so entra nesta logica
+                    # quando o valor e mesmo texto citado, tal como acontecia antes do fix.
                     $acao = if ($jsonText -match '"?acao"?\s*:[\s"]*([a-zA-Z]+)' -and $matches[1] -ne 'null') { $matches[1].ToLower() } else { "hold" }
                     $par = if ($jsonText -match '"?par"?\s*:[\s"]*([A-Za-z0-9]+(?:\s*/\s*[A-Za-z0-9]+)?)' -and $matches[1] -ne 'null') { ($matches[1] -replace '\s', '').ToUpper() } else { $null }
                     $montante = if ($jsonText -match '"?montante"?\s*:[\s"]*(\d+\.?\d*)') { [decimal]$matches[1] } else { 5.0 }
                     $stopLoss = if ($jsonText -match '"?stopLoss"?\s*:[\s"]*(\d+\.?\d*)') { [decimal]$matches[1] } else { $null }
                     $alvo = if ($jsonText -match '"?alvo"?\s*:[\s"]*(\d+\.?\d*)') { [decimal]$matches[1] } else { $null }
-                    $estrategia = if ($jsonText -match '"?estrategia"?\s*:[\s"]*(?:[^"\n]*\n"?)*([^"\n]*)"') { $matches[1] } else { "Extraida da IA" }
+                    $estrategia = if ($jsonText -match '"?estrategia"?\s*:[\s"]*"(?:[^"\n]*\n"?)*([^"\n]*)"') { $matches[1] } else { "Extraida da IA" }
                     $risco = if ($jsonText -match '"?risco"?\s*:[\s"]*([a-zA-Z]+)') { $matches[1].ToLower() } else { "baixo" }
                     $confianca = if ($jsonText -match '"?confianca"?\s*:[\s"]*(\d+\.?\d*)') { [decimal]$matches[1] } else { 0.5 }
                     $criarAgentes = if ($jsonText -match '"?criarAgentes"?\s*:[\s"]*(\d+)') { [int]$matches[1] } else { 0 }
-                    $missaoNovoAgente = if ($jsonText -match '"?missaoNovoAgente"?\s*:[\s"]*(?:[^"\n]*\n"?)*([^"\n]*)"' -and $matches[1] -ne 'null') { $matches[1] } else { $null }
-                    $pesquisar = if ($jsonText -match '"?pesquisar"?\s*:[\s"]*(?:[^"\n]*\n"?)*([^"\n]*)"' -and $matches[1] -ne 'null') { $matches[1] } else { $null }
+                    $missaoNovoAgente = if ($jsonText -match '"?missaoNovoAgente"?\s*:[\s"]*"(?:[^"\n]*\n"?)*([^"\n]*)"' -and $matches[1] -ne 'null') { $matches[1] } else { $null }
+                    $pesquisar = if ($jsonText -match '"?pesquisar"?\s*:[\s"]*"(?:[^"\n]*\n"?)*([^"\n]*)"' -and $matches[1] -ne 'null') { $matches[1] } else { $null }
 
                     # Guarda o texto de raciocinio livre para servir de memoria nos proximos ciclos.
                     # Ela nem sempre coloca a explicacao antes do JSON - as vezes decide primeiro e
@@ -1598,7 +1618,23 @@ $estadoAnterior = Load-Estado
 if ($estadoAnterior) {
     $estado = $estadoAnterior
     Log "Estado anterior carregado" "INFO"
+
+    # FIX: o supervisor.ps1 tem "1000" como valor por omissao de -ObjetivoPatrimonio,
+    # e esse valor nao fica guardado em lado nenhum a nao ser aqui no estado - se o
+    # supervisor for relancado sem incluir explicitamente -ObjetivoPatrimonio (ex: o
+    # utilizador esquece-se de repetir a flag), o objetivo revertia silenciosamente
+    # para 1000 mesmo depois de ter sido corretamente definido para outro valor (ex:
+    # 100) antes. So substitui pelo valor guardado quando NAO foi passada a flag
+    # explicitamente - se foi passada, respeita-se a intencao explicita do utilizador
+    # de mudar o objetivo agora.
+    if (-not $objetivoPatrimonioFoiPassadoExplicitamente -and $estado.objetivoPatrimonio) {
+        if ($ObjetivoPatrimonio -ne $estado.objetivoPatrimonio) {
+            Log "ObjetivoPatrimonio nao foi passado explicitamente - a manter o valor guardado do estado anterior ($($estado.objetivoPatrimonio) USD) em vez do valor por omissao ($ObjetivoPatrimonio USD)" "INFO"
+        }
+        $ObjetivoPatrimonio = $estado.objetivoPatrimonio
+    }
 }
+$estado.objetivoPatrimonio = $ObjetivoPatrimonio
 
 # Continua a contagem de ciclos de onde ficou (nao reinicia para 1 a cada reinicio do
 # processo) - senao os logs mostram numeros de ciclo repetidos apos um crash/reinicio
