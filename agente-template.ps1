@@ -127,6 +127,51 @@ function Limpa-OutputOllama {
     return $outputText
 }
 
+# ============================================================================
+# COMUNICACAO COM O OLLAMA (API HTTP local, nao CLI de terminal)
+# ============================================================================
+# Isto falava antes com "ollama run mistral" como processo de CLI de terminal,
+# que redesenha a linha da resposta a medida que os tokens chegam (para dar o
+# efeito de escrita "ao vivo" numa consola real). Quando capturado via pipe em
+# vez de um terminal interativo, esse redesenho nao desaparece - fica gravado
+# como texto plano, produzindo um artefacto muito persistente de palavras e
+# fragmentos duplicados a cada quebra de linha (ex: "grandes risco\nriscos."
+# em vez de so "grandes riscos."), que por vezes cortava valores de campos a
+# meio (a causa de varios bugs de pesquisa truncada ja corrigidos antes disto).
+# A API HTTP do proprio Ollama (que corre sempre em localhost:11434 assim que
+# o Ollama esta instalado, mesmo sem usar o CLI) devolve a resposta como JSON
+# limpo, sem qualquer redesenho de terminal envolvido - elimina esta classe de
+# bugs pela raiz, em vez de continuar a corrigir sintomas caso a caso.
+$script:OLLAMA_API_URL = "http://localhost:11434/api/generate"
+
+function Invoke-OllamaAPI {
+    param(
+        [string]$prompt,
+        [switch]$FormatJson,
+        [int]$TimeoutSec = 180
+    )
+
+    $body = @{
+        model = "mistral"
+        prompt = $prompt
+        stream = $false
+    }
+    # "format": "json" faz o proprio Ollama GARANTIR que a resposta e JSON
+    # sintaticamente valido (a geracao e restringida token a token para nunca
+    # sair da gramatica JSON) - a resposta dela deixa de poder ter texto livre
+    # antes/depois do bloco, tem de ser so o objeto JSON.
+    if ($FormatJson) { $body.format = "json" }
+
+    $bodyJson = $body | ConvertTo-Json -Depth 5
+    $resposta = Invoke-RestMethod -Uri $script:OLLAMA_API_URL -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($bodyJson)) -TimeoutSec $TimeoutSec
+
+    if ($resposta.error) {
+        throw "Ollama devolveu um erro: $($resposta.error)"
+    }
+
+    return $resposta.response
+}
+
 # So para a mensagem que chega ao Telegram - traduz o pensamento dela para portugues
 # quando ela escreve noutra lingua (Mistral, sendo um modelo pequeno, nem sempre segue
 # a instrucao de idioma pedida no prompt principal). O raciocinio guardado no historico/
@@ -140,16 +185,10 @@ function Traduz-Para-Portugues {
     try {
         $promptTraducao = "Traduz TODO o texto seguinte para portugues europeu. E MUITO IMPORTANTE: a tua resposta tem de estar inteiramente em portugues, nunca em ingles, espanhol ou qualquer outra lingua, mesmo que o texto original esteja nessas linguas. Nao acrescentes comentarios nem explicacoes, nao repitas o texto original, nao uses aspas a volta - responde APENAS com o texto traduzido.`n`nTexto a traduzir:`n$texto"
         Log "A traduzir pensamento para o Telegram..." "IA"
-        $output = $promptTraducao | & ollama run mistral 2>&1
+        $outputText = Invoke-OllamaAPI -prompt $promptTraducao
 
-        if (-not $output) {
+        if ([string]::IsNullOrWhiteSpace($outputText)) {
             Log "AVISO: Traducao nao devolveu nada, a usar texto original no Telegram" "AVISO"
-            return $texto
-        }
-        $outputText = ($output -join "`n")
-
-        if ($outputText -match '^Error:|RemoteException|is not recognized as|ollama: command not found') {
-            Log "AVISO: Traducao falhou (erro de CLI do Ollama), a usar texto original no Telegram: $outputText" "AVISO"
             return $texto
         }
 
@@ -692,11 +731,9 @@ $($contexto.mercado | ForEach-Object { "- $($_.par): `$$($_.preco) (mudanca 24h:
 
 Ninguem te vai dizer o que fazer nem como fazer. Pensa livremente sobre a tua situacao e decide tu mesmo o que fazer a seguir - podes abrir uma posicao nova, reforcar ou vender uma que ja tens, ou nao fazer nada agora.
 
-(Escreve os teus pensamentos em portugues - isto e so para eu conseguir acompanhar o que pensas, nao influencia em nada a tua decisao.)
+A tua resposta tem de ser APENAS um objeto JSON, nada antes nem depois, com este formato exato (usa null nos campos que nao se aplicarem, e 0 se nao quiseres criar nada). Escreve os teus pensamentos livremente em portugues dentro do campo "raciocinio" - isso e so para eu conseguir acompanhar o que pensas, nao influencia em nada a tua decisao. O "montante" e sempre o valor em USD que queres investir (nao a quantidade de moeda) - por exemplo, para comprar 20 USD de ETH e "montante": 20, seja qual for o preco do ETH. Se pedires "criarAgentes", o novo agente fica na mesma empresa (o objetivo de $ObjetivoPatrimonio USD passa a contar a soma dele com a tua) mas ele pensa e decide por si mesmo - usa "missaoNovoAgente" para lhe dares uma missao/foco (ex: "foca-te so em ADA e XRP"), ou deixa null para lhe dares liberdade total. Se quiseres saber algo que nao esta nesta informacao (noticias, o que aconteceu com uma moeda, contexto do mercado), usa "pesquisar" para escreveres o que queres pesquisar na internet - o resultado aparece-te na proxima vez que pensares nisto:
 
-No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos que nao se aplicarem, e 0 se nao quiseres criar nada). O "montante" e sempre o valor em USD que queres investir (nao a quantidade de moeda) - por exemplo, para comprar 20 USD de ETH e "montante": 20, seja qual for o preco do ETH. Se pedires "criarAgentes", o novo agente fica na mesma empresa (o objetivo de $ObjetivoPatrimonio USD passa a contar a soma dele com a tua) mas ele pensa e decide por si mesmo - usa "missaoNovoAgente" para lhe dares uma missao/foco (ex: "foca-te so em ADA e XRP"), ou deixa null para lhe dares liberdade total. Se quiseres saber algo que nao esta nesta informacao (noticias, o que aconteceu com uma moeda, contexto do mercado), usa "pesquisar" para escreveres o que queres pesquisar na internet - o resultado aparece-te na proxima vez que pensares nisto:
-
-{"acao": "...", "par": "...", "montante": ..., "stopLoss": ..., "alvo": ..., "criarAgentes": 0, "missaoNovoAgente": null, "pesquisar": null}
+{"raciocinio": "...", "acao": "...", "par": "...", "montante": ..., "stopLoss": ..., "alvo": ..., "criarAgentes": 0, "missaoNovoAgente": null, "pesquisar": null}
 "@
 
     try {
@@ -706,50 +743,81 @@ No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos
 
         Log "Consultando Ollama/Mistral (IA local)..." "IA"
 
-        # Nota: ja NAO se faz aqui a dupla conversao GetString(Default.GetBytes(...)) que
-        # existia antes. Essa conversao so era necessaria porque a consola nao estava a
-        # decodificar o UTF-8 do Ollama corretamente por omissao. Agora que forcamos
-        # [Console]::OutputEncoding para UTF-8 no arranque do script, a captura do
-        # output do Ollama ja vem correta - manter aquela dupla conversao aqui em cima
-        # disto corromperia texto que ja esta certo (foi o que causou a corrupcao "?"
-        # e "�" vista depois de aplicar o fix da consola)
-        #
-        # FIX CRITICO: o prompt e passado via STDIN (pipe), nao como argumento de linha
-        # de comando. Quando o prompt continha algo como "mudanca 24h: -1.2%)", o ollama
-        # (biblioteca de CLI em Go) interpretava "-1" como uma FLAG desconhecida e falhava
-        # de imediato ("Error: unknown shorthand flag") sem sequer consultar o modelo -
-        # e essa mensagem de erro ainda era guardada como se fosse raciocinio dela.
-        # Passar por stdin evita todo o parsing de argumentos da linha de comando.
-        $output = $prompt | & ollama run mistral 2>&1
-
-        if ($output) {
-            $outputText = $output -join "`n"
-
-            # Se o proprio comando ollama falhou (erro de CLI, processo nao encontrado, etc.),
-            # isto NAO e uma resposta dela - nunca deve ser guardado como raciocinio/memoria.
-            # Sem isto, uma mensagem de erro do sistema era gravada como se fosse algo que
-            # ela pensou, e depois devolvida a ela propria no proximo ciclo como "memoria".
-            if ($outputText -match '^Error:|RemoteException|is not recognized as|ollama: command not found') {
-                Log "Ollama falhou a responder (erro de CLI, nao do modelo): $outputText" "ERRO"
-                return @{
-                    acao = "hold"
-                    par = $null
-                    risco = "baixo"
-                    confianca = 0
-                    estrategia = "Erro de comunicacao com o Ollama"
-                    raciocinio = "(sem resposta - falha tecnica na chamada ao Ollama, nao gravado como pensamento)"
-                    criarAgentes = 0
-                }
+        # FIX: chamada via API HTTP do Ollama (ver Invoke-OllamaAPI acima) em vez do
+        # antigo "ollama run mistral" de CLI - elimina pela raiz o artefacto de
+        # redesenho de terminal (palavras/campos duplicados e truncados a meio) que
+        # motivou varios fixes anteriores por regex. "-FormatJson" obriga o Ollama a
+        # devolver sempre JSON sintaticamente valido, sem texto livre a volta.
+        $outputText = $null
+        try {
+            $outputText = Invoke-OllamaAPI -prompt $prompt -FormatJson
+        } catch {
+            # Falha de comunicacao (Ollama nao esta a correr, API inacessivel, timeout,
+            # modelo nao encontrado, etc.) - isto NAO e uma resposta dela, nunca deve ser
+            # guardado como raciocinio/memoria.
+            Log "Ollama falhou a responder (erro na chamada a API HTTP local): $_" "ERRO"
+            return @{
+                acao = "hold"
+                par = $null
+                risco = "baixo"
+                confianca = 0
+                estrategia = "Erro de comunicacao com o Ollama"
+                raciocinio = "(sem resposta - falha tecnica na chamada ao Ollama, nao gravado como pensamento)"
+                criarAgentes = 0
             }
+        }
 
-            # Remove codigos ANSI de escape do terminal, caracteres de substituicao e o
-            # spinner Braille do Ollama antes de qualquer uso, para nao poluir nem o
-            # parsing nem a memoria guardada entre ciclos (mesma limpeza usada na traducao
-            # para o Telegram, ver Limpa-OutputOllama)
+        if ($outputText) {
+            # Limpeza defensiva - a API HTTP nao passa por nenhum terminal, por isso nao
+            # deviam aparecer codigos ANSI/spinner aqui, mas mantem-se por seguranca.
             $outputText = Limpa-OutputOllama $outputText
             Log "========== RESPOSTA COMPLETA DO MISTRAL ==========" "IA"
             Log $outputText "IA"
             Log "========== FIM RESPOSTA ==========" "IA"
+
+            # FIX: com "format": "json" o proprio Ollama GARANTE que a resposta e JSON
+            # sintaticamente valido - tenta-se primeiro o parsing estrito (mais simples e
+            # fiavel do que qualquer regex), e so se isso falhar (resposta sem os campos
+            # esperados, ou uma versao do Ollama que nao suporte "format") e que se recorre
+            # a extracao tolerante por regex mais abaixo, exatamente como antes desta mudanca.
+            $decisaoEstrita = $null
+            try {
+                $decisaoEstrita = $outputText | ConvertFrom-Json -ErrorAction Stop
+            } catch {
+                $decisaoEstrita = $null
+            }
+
+            if ($decisaoEstrita -and $decisaoEstrita.acao) {
+                $acao = ([string]$decisaoEstrita.acao).ToLower()
+                $par = if ($decisaoEstrita.par -and ([string]$decisaoEstrita.par) -ne 'null') { (([string]$decisaoEstrita.par) -replace '\s', '').ToUpper() } else { $null }
+                $montante = if ($null -ne $decisaoEstrita.montante -and ([string]$decisaoEstrita.montante) -ne 'null') { [decimal]$decisaoEstrita.montante } else { 5.0 }
+                $stopLoss = if ($null -ne $decisaoEstrita.stopLoss -and ([string]$decisaoEstrita.stopLoss) -ne 'null') { [decimal]$decisaoEstrita.stopLoss } else { $null }
+                $alvo = if ($null -ne $decisaoEstrita.alvo -and ([string]$decisaoEstrita.alvo) -ne 'null') { [decimal]$decisaoEstrita.alvo } else { $null }
+                $criarAgentes = if ($null -ne $decisaoEstrita.criarAgentes) { [int]$decisaoEstrita.criarAgentes } else { 0 }
+                $missaoNovoAgente = if ($decisaoEstrita.missaoNovoAgente -and ([string]$decisaoEstrita.missaoNovoAgente) -ne 'null') { [string]$decisaoEstrita.missaoNovoAgente } else { $null }
+                $pesquisar = if ($decisaoEstrita.pesquisar -and ([string]$decisaoEstrita.pesquisar) -ne 'null') { [string]$decisaoEstrita.pesquisar } else { $null }
+                $raciocinio = if ($decisaoEstrita.raciocinio) { [string]$decisaoEstrita.raciocinio } else { "(sem texto de raciocinio nesta resposta)" }
+
+                $deciso = @{
+                    acao = $acao
+                    par = $par
+                    montante = $montante
+                    stopLoss = $stopLoss
+                    alvo = $alvo
+                    estrategia = "Extraida da IA (JSON estrito)"
+                    risco = "baixo"
+                    confianca = 0.5
+                    raciocinio = $raciocinio
+                    criarAgentes = $criarAgentes
+                    missaoNovoAgente = $missaoNovoAgente
+                    pesquisar = $pesquisar
+                }
+
+                Log "IA: Acao=$($deciso.acao), Par=$($deciso.par), Confianca=$($deciso.confianca), CriarAgentes=$($deciso.criarAgentes)" "IA"
+                return $deciso
+            }
+
+            Log "JSON estrito nao tinha os campos esperados - a tentar extracao tolerante por regex (fallback)..." "AVISO"
 
             # Usa o ULTIMO bloco de decisao encontrado, nao o primeiro: as vezes ela escreve
             # uma decisao, reconsidera e escreve outra mais a frente na mesma resposta -
@@ -811,9 +879,17 @@ No fim da tua resposta, regista a tua decisao neste formato (usa null nos campos
                     $pesquisar = if ($jsonText -match '"?pesquisar"?\s*:[\s"]*"(?:[^"\n]*\n"?)*([^"\n]*)"' -and $matches[1] -ne 'null') { $matches[1] } else { $null }
 
                     # Guarda o texto de raciocinio livre para servir de memoria nos proximos ciclos.
-                    # Ela nem sempre coloca a explicacao antes do JSON - as vezes decide primeiro e
-                    # explica depois - por isso apanha-se tudo o resto do texto, nao so o que vem antes.
-                    $raciocinio = $outputText.Replace($jsonText, "").Trim()
+                    # Desde que "raciocinio" passou a ser um campo do proprio JSON (para
+                    # funcionar com "format": "json", que obriga a resposta toda a ser JSON e
+                    # nao permite texto livre a volta), tenta-se extrair esse campo primeiro;
+                    # se nao existir (resposta mais antiga, ou este bloco veio de um fallback
+                    # sem esse campo), usa-se o comportamento anterior de aproveitar tudo o
+                    # resto do texto como raciocinio.
+                    $raciocinio = if ($jsonText -match '"?raciocinio"?\s*:[\s"]*"(?:[^"\n]*\n"?)*([^"\n]*)"' -and $matches[1] -ne 'null') {
+                        $matches[1]
+                    } else {
+                        $outputText.Replace($jsonText, "").Trim()
+                    }
                     if ([string]::IsNullOrWhiteSpace($raciocinio)) { $raciocinio = "(sem texto de raciocinio nesta resposta)" }
 
                     $deciso = @{
