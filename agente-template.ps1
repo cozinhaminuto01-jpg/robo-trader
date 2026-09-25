@@ -716,6 +716,24 @@ function Resume-Historico {
     return "Nos ultimos $($recentes.Count) ciclos, as tuas decisoes foram: $resumoAcoes. $resumoFechados`nO teu ultimo pensamento foi: $ultimoRaciocinio"
 }
 
+# FIX: por vezes ela responde com uma lista em vez de um valor unico para um campo que
+# devia ser escalar (ex: "par": ["ADA/USDT", "ETH/USDT"] quando hesita entre duas moedas,
+# ou "acao": ["comprar", "SOL/USDT", "ETH/USDT"] misturando a acao com pares na mesma
+# lista) - confirmado no log real (ciclos 250 e 252). Agora que a resposta vem de JSON
+# estrito em vez da antiga regex (que so conseguia mesmo capturar uma palavra), isto
+# passou a ser possivel. Sem tratar isto, o cast direto para string juntava os elementos
+# da lista sem separador nenhum, produzindo valores sem sentido (ex: "ADA/USDTETH/USDT") -
+# a validacao de par desconhecido ja bloqueava esses casos antes de qualquer trade real,
+# mas o valor nem devia chegar la assim. Usa-se sempre o primeiro elemento da lista (a
+# primeira intencao dela).
+function Desembrulha-Valor {
+    param($valor)
+    if ($valor -is [array]) {
+        if ($valor.Count -gt 0) { return $valor[0] } else { return $null }
+    }
+    return $valor
+}
+
 function Chama-IA {
     param([hashtable]$contexto)
 
@@ -840,14 +858,22 @@ A tua resposta tem de ser APENAS um objeto JSON, nada antes nem depois, com este
             }
 
             if ($decisaoEstrita -and $decisaoEstrita.acao) {
-                $acao = ([string]$decisaoEstrita.acao).ToLower()
-                $par = if ($decisaoEstrita.par -and ([string]$decisaoEstrita.par) -ne 'null') { (([string]$decisaoEstrita.par) -replace '\s', '').ToUpper() } else { $null }
-                $montante = if ($null -ne $decisaoEstrita.montante -and ([string]$decisaoEstrita.montante) -ne 'null') { [decimal]$decisaoEstrita.montante } else { 5.0 }
-                $stopLoss = if ($null -ne $decisaoEstrita.stopLoss -and ([string]$decisaoEstrita.stopLoss) -ne 'null') { [decimal]$decisaoEstrita.stopLoss } else { $null }
-                $alvo = if ($null -ne $decisaoEstrita.alvo -and ([string]$decisaoEstrita.alvo) -ne 'null') { [decimal]$decisaoEstrita.alvo } else { $null }
+                $acaoValor = Desembrulha-Valor $decisaoEstrita.acao
+                $parValor = Desembrulha-Valor $decisaoEstrita.par
+                $montanteValor = Desembrulha-Valor $decisaoEstrita.montante
+                $stopLossValor = Desembrulha-Valor $decisaoEstrita.stopLoss
+                $alvoValor = Desembrulha-Valor $decisaoEstrita.alvo
+                $missaoValor = Desembrulha-Valor $decisaoEstrita.missaoNovoAgente
+                $pesquisarValor = Desembrulha-Valor $decisaoEstrita.pesquisar
+
+                $acao = ([string]$acaoValor).ToLower()
+                $par = if ($parValor -and ([string]$parValor) -ne 'null') { (([string]$parValor) -replace '\s', '').ToUpper() } else { $null }
+                $montante = if ($null -ne $montanteValor -and ([string]$montanteValor) -ne 'null') { [decimal]$montanteValor } else { 5.0 }
+                $stopLoss = if ($null -ne $stopLossValor -and ([string]$stopLossValor) -ne 'null') { [decimal]$stopLossValor } else { $null }
+                $alvo = if ($null -ne $alvoValor -and ([string]$alvoValor) -ne 'null') { [decimal]$alvoValor } else { $null }
                 $criarAgentes = if ($null -ne $decisaoEstrita.criarAgentes) { [int]$decisaoEstrita.criarAgentes } else { 0 }
-                $missaoNovoAgente = if ($decisaoEstrita.missaoNovoAgente -and ([string]$decisaoEstrita.missaoNovoAgente) -ne 'null') { [string]$decisaoEstrita.missaoNovoAgente } else { $null }
-                $pesquisar = if ($decisaoEstrita.pesquisar -and ([string]$decisaoEstrita.pesquisar) -ne 'null') { [string]$decisaoEstrita.pesquisar } else { $null }
+                $missaoNovoAgente = if ($missaoValor -and ([string]$missaoValor) -ne 'null') { [string]$missaoValor } else { $null }
+                $pesquisar = if ($pesquisarValor -and ([string]$pesquisarValor) -ne 'null') { [string]$pesquisarValor } else { $null }
                 $raciocinio = if ($decisaoEstrita.raciocinio) { [string]$decisaoEstrita.raciocinio } else { "(sem texto de raciocinio nesta resposta)" }
 
                 $deciso = @{
